@@ -2,9 +2,9 @@
 
 This is the end-user side of the workflow `SKILL.md` describes to Claude.
 You don't run any of the commands below yourself — Claude does — this page
-just shows what to expect at each step, using one of the skill's own worked
-examples (`models/boss_plate.py`) so every number here is real output, not a
-mockup.
+just shows what to expect at each step. Every screenshot below is a real
+capture of the skill's own worked example (`models/boss_plate.py`) running
+in a browser, not a mockup.
 
 ## 1. Ask for a part
 
@@ -41,58 +41,49 @@ deletes the STL rather than leaving a wrong part on disk.
 
 ## 3. Claude publishes a CAD Bench page — this is what you see
 
-A live page with a slider for every dimension, a preview sketch, and a row
-of pass/fail checks that update as you drag. For the corner-boss plate:
+A live page with a slider for every dimension, a preview sketch that
+redraws as you move them:
 
-```
-┌─ PLATE ──────────────────────────┐   TOP VIEW              BOSS, SECTION
-│ Long side             [====|-] 60 mm │   ┌──────────────┐    ┌────┐
-│ Short side            [===|--] 40 mm │   │ (o)      (o) │    │▓▓░░▓▓│
-│ Thickness              [==|---]  3 mm │   │              │    │▓▓░░▓▓│
-│ Hole inset from edges  [==|---]  8 mm │   │ (o)      (o) │    │▓▓░░▓▓│
-├─ BOSS ────────────────────────────┤   └──────────────┘    └────┘
-│ Diameter               [==|---] 10 mm │      60 × 40         Ø10×12 bore Ø4
-│ Height                 [==|---] 12 mm │
-│ Bore diameter          [=|----]  4 mm │
-└────────────────────────────────────┘
+![Sliders on the left, a live top-view and section sketch on the right](docs/screenshots/01-sliders-drawing.png)
 
-  BOSS WALL   BOSS PROUD   RIM TO EDGE   HOLE PITCH X   HOLE PITCH Y   VOLUME
-  3.00        9.0          3.00          44.0           24.0           9424 mm³
+Type a value directly in the box next to a slider instead of dragging, and
+it clamps to that slider's own range and snaps to its step — 17.3 mm on a
+0.5 mm-step slider lands on 17.5, not 17.3, matching exactly what the slider
+itself would have landed on.
 
-  ✓ Boss wall survives a heat-set insert      3.00 mm, want ≥ 2
-  ✓ Boss stands proud of the plate            9.0 mm above the face
-  ✓ Boss sits fully on the plate               3.00 mm rim to edge
-  ✓ Bore clears the plate edge                 6.00 mm
-  ✓ Opposite bosses do not overlap             centres 44 × 24 mm apart
-  ✓ Bore is deeper than it is wide             12 mm deep, Ø4.0
-```
+## 4. A row of checks, not a generic linter
 
-(Real output from `boss_plate.py`'s own default values, read straight off a
-running copy of the page — not invented for this doc.)
+Below the sketch, the numbers that actually matter for this part — and a
+pass/fail row for every physical constraint, in plain language:
 
-Each row is a physical constraint, not a generic linter — "does this wall
-survive a heat-set insert being melted into it," not "is this number
-positive." A `d.`/`p.` mixup or a typo in a check reads as a **red row**,
-same as a real failure — that's why `scripts/check_bench.py` exists (see
-below), and why a red row always means *something* is wrong, even if it
-turns out to be the check's own arithmetic rather than the part.
+![Six constraint rows, all green: boss wall thickness, standoff height, edge clearance, bore depth](docs/screenshots/02-checks-green.png)
 
-## 4. You drag sliders, not edit numbers in a file
+Each row is a real constraint, not "is this number positive" — *"does this
+wall survive a heat-set insert being melted into it,"* not a generic range
+check. Push a value past what the part can actually take and a row turns
+red, with the exact number that failed:
 
-Type a value in the box next to a slider and it clamps to that slider's own
-range and snaps to its step — 17.3 mm on a 0.5 mm-step slider lands on 17.5,
-not 17.3, matching exactly what the slider itself would have landed on.
-Move anything until every check is green, then press **"Hand these to
-Claude"**.
+![One red row -- boss wall thinned to 0.50mm against a 2mm minimum -- five still green](docs/screenshots/04-checks-red.png)
 
-## 5. Claude reads the values back and regenerates
+(This one is real too: the boss diameter was set to 5 mm against a 4 mm
+bore, so the wall left around the insert is only 0.5 mm — the check catches
+it and says by how much, not just pass/fail.)
 
-The values you set are written to a small per-part store on the page; Claude
-reads them, writes them to `models/boss_plate.params.json`, and re-runs the
-model — same gate, same one-line-on-success report, now with your numbers
-instead of the defaults. You get the new STL and a note on which check had
-the least margin, since that's where the next change is most likely to break
-something.
+## 5. Hand the values back to Claude
+
+Once every check is green, the bottom of the page has the constants your
+sliders landed on, ready to hand off:
+
+![A textarea to paste constants back in, and a generated const block for the model's parameters](docs/screenshots/03-handoff.png)
+
+Inside the Claude Code app this panel also shows a **"Hand these to
+Claude"** button (it needs a small capability the app grants; a plain
+browser falls back to **Copy parameters**, shown above). Either way, Claude
+reads the values back, writes them to `models/boss_plate.params.json`, and
+re-runs the model — same gate, same one-line-on-success report, now with
+your numbers instead of the defaults. You get the new STL and a note on
+which check had the least margin, since that's where the next change is
+most likely to break something.
 
 ## What it won't do
 
