@@ -1,0 +1,163 @@
+---
+name: cad-bench
+description: >-
+  Model a mechanical part in Python with an exact CAD kernel, let the user
+  tune its dimensions on an interactive slider page ("CAD Bench") that shows
+  the binding constraints live, and export a verified, printable STL. Handles
+  fillets, chamfers, shells, lofts, sweeps and revolves as real geometry, not
+  approximations. Use whenever the user wants to design, model or 3D-print a
+  part -- bracket, mount, standoff, enclosure, housing, skirt, tray, spacer,
+  adapter, duct, jig, knob, clip, gasket, fixture -- or wants to adjust a
+  part's dimensions against what actually binds (wall thickness, print
+  overhang, clearance, material around a bore) and re-export. Trigger on
+  "make me a bracket", "model a mount for X", "design an enclosure", "round
+  the corners", "hollow it out", "parametric part", "tweak the dimensions and
+  give me an STL", "export to STL", "CAD bench" -- even when no CAD tool is
+  named.
+---
+
+# cad-bench
+
+Model in Python against a real B-rep kernel, let the user dial dimensions on
+a browser page, export a gated STL. No CAD account, no cloud round-trip.
+
+One backend, always: `scripts/brep.py` wrapping build123d/OCCT. Plain
+prismatic work goes through it too — there is no second path to choose and no
+hand-computed volume to get wrong.
+
+## Setup (once per machine)
+
+```
+python -m venv <path>/cad-bench-venv
+<path>/cad-bench-venv/Scripts/python -m pip install build123d trimesh numpy
+```
+
+`build123d` pulls the OCCT kernel (~500 MB). `trimesh` reads the exported STL
+back for verification. Record the venv path; every run uses its `python`.
+
+## Workflow
+
+### 1. Pin down the geometry and what binds
+
+The feature tree: which primitives, where, combined in what order. Then the
+constraints — not "plate is 60 mm" but "boss wall ≥ 2 mm around a heat-set
+insert", "inner corner radius = corner_r − wall, must stay positive". These
+become `wall_check()` calls in the model and check rows on the bench, and
+they are the point: a bounding box cannot see any of them.
+
+### 2. Scaffold, don't hand-write
+
+```
+python scripts/new_part.py --name spacer_plate \
+    --params "plate_x=90,plate_y=50,plate_t=4,bore_d=30,hole_d=4.5,inset=8"
+```
+
+Writes `models/spacer_plate.py` (runnable immediately, builds a placeholder
+box) and `models/spacer_plate.recipe.js` (a bench entry stub with matching
+sliders). Run it as-is to confirm the harness works, then replace `derive()`,
+`build()`, and the recipe's `checks()`/`draw()`. Parameter names are already
+identical on both sides, which is the one coupling that must hold.
+
+### 3. Model it — the rules that prevent most failures
+
+```python
+import brep as B                      # NEVER `import build123d` directly
+part = B.Box(80, 60, 30, align=(B.Align.CENTER, B.Align.CENTER, B.Align.MIN))
+part = B.safe_fillet(part, B.vertical_edges(part), 6)
+part = B.offset(part, amount=-2.4, openings=B.top_face(part))
+part = B.safe_chamfer(part, B.outer_of(B.top_edges(part)), 0.8)
+part -= B.Pos(0, -30, 8) * B.Box(16, 10, 9)
+```
+
+- **`import brep as B`, never `build123d`.** build123d scans every system font
+  at import and does not catch parse errors; one malformed file (Windows 11
+  ships `mstmc.ttf`, a stub) aborts the import and looks like a broken
+  install. `brep.py` neutralises it. First import ~6 s; operations after are
+  milliseconds.
+- **Order: solid → fillet → shell → chamfer → internal features → bores.**
+  Fillet while it is still solid; rounding after shelling makes the fillet
+  negotiate a thin wall and it often just fails.
+- **A shelled rim has TWO loops.** `top_edges()` returns both, and chamfering
+  both eats the wall from each side. Use `B.outer_of(B.top_edges(part))`.
+- **Never shell a loft.** Loft the outer profiles, loft the inner profiles
+  (extended a mm past each end), subtract. Offsetting a doubly-curved surface
+  is slow and usually fails.
+- **`loft`, `revolve`, `sweep` need `with B.BuildPart()`** — they have no
+  algebra form. Take `bp.part` out and go back to `+`/`-`.
+- `safe_fillet` / `safe_chamfer` diagnose failures and report the largest
+  radius that works, via `B.max_fillet(part, edges)`.
+
+`references/brep.md` is a **lookup** — go to it for a specific operation,
+selector or failure, not as a cover-to-cover read. `models/enclosure.py`
+(fillet/shell/chamfer) and `models/duct.py` (loft) are usually the faster
+answer.
+
+### 4. Verify — the gate is not optional
+
+```python
+B.wall_check("inner corner radius", corner_r - wall, 0.5)
+if B.solid_count(part) != 1: raise B.VerifyError("expected one solid")
+B.export_verified(part, "part.stl", "part", expect_bbox=(lo, hi))
+```
+
+`export_verified` raises on: not watertight, winding inconsistent, volume
+≤ 0, mesh volume more than 0.5% off the kernel's exact volume, or bbox off by
+> 0.05 mm. **A failed export deletes the STL** rather than leaving a wrong
+part on disk.
+
+**Output is one line on success, full detail on failure, by design.** A
+model gets run several times while it's being built and each run's stdout
+comes back into your context — a dozen lines of routine watertight/bbox/radius
+detail on every passing run is pure waste. Don't work around this by adding
+your own extra prints or re-running "to see the numbers"; if you need the
+full report while first writing a model, pass `verbose=True` to
+`export_verified` / `verify` / `wall_check`. A failing gate always prints in
+full regardless, because that's when the numbers are worth reading.
+
+**A pass is a pass.** Do not re-export with a tighter `tolerance` because the
+margin felt close — 0.4% against a 0.5% gate is fine, and halving tolerance
+multiplies file size for detail no printer resolves. Tighten only when the
+gate actually fails. Pass `step=True` for a STEP file alongside.
+
+**Selection bugs do not raise.** If a fillet or chamfer targets a selected
+edge set, prove it hit the right edges by differential volume: build with the
+feature at zero, subtract, compare against what it should remove. Recipe in
+`references/verification.md`.
+
+### 5. Bench page
+
+One shared CAD Bench artifact, a multi-part picker. First use: publish
+`assets/bench-template.html` (declares the `db` capability — read
+`artifact-capabilities` first). Later parts: read the artifact, paste your
+`.recipe.js` into `PARTS`, republish to the same URL.
+
+**Before publishing, always:**
+
+```
+python scripts/check_bench.py <bench.html>
+```
+
+It runs every recipe headlessly at defaults and at every slider extreme, and
+fails on the one bug this format has: reading `d.plate_x` when `plate_x` is a
+slider gives `undefined`, `undefined >= 2` is an ordinary `false`, and the row
+goes **red like a real constraint failure** — so you tune sliders chasing a
+typo. Sliders are on `p`, computed values on `d`. Field spec and SVG helpers
+are in `references/bench-artifact.md`.
+
+Then hand the user the link: adjust sliders, and when the checks are green
+press **"Hand these to Claude"**.
+
+### 6. Read back, regenerate, deliver
+
+```
+Artifact  action:read_db  url:<artifact-url>  db_op:get
+          collection:"bench"  doc_id:"<part>"
+```
+
+Write the returned `params` to `models/<part>.params.json` and re-run the
+model — it picks the file up automatically. Send the STL with the
+file-delivery tool and report volume, bbox, and which constraint had the
+least margin; that is where the next change will break something.
+
+Each hand-off overwrites `bench/<part>`. If you add a dimension to the model,
+add the slider in the same change or the round-trip silently drops it.

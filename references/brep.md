@@ -1,0 +1,273 @@
+# brep.py lookup
+
+Exact geometry via `build123d` / OCCT. This is the only backend.
+
+**Use this file as a lookup, not a read-through.** SKILL.md already carries
+the rules that prevent most failures. Come here for a specific operation, a
+selector you cannot name, or a failure you cannot explain. Jump to the
+section you need.
+
+```python
+import brep as B          # NOT `import build123d` -- see "The import" below
+part = B.Box(40, 30, 10)
+part = B.safe_fillet(part, B.vertical_edges(part), 4)
+B.export_verified(part, "part.stl", "part")
+```
+
+## Contents
+
+1. The import, and why it is wrapped
+2. Selectors — the part that actually goes wrong
+3. Operations and their failure modes
+4. Order of operations
+5. Tessellation and verification
+6. Builder mode vs algebra mode
+
+---
+
+## 1. The import, and why it is wrapped
+
+`build123d` registers every system font at import time so `Text()` works. On
+Windows it walks `C:/Windows/Fonts` with fontTools and does **not** catch
+parse errors, so one malformed file anywhere in that folder aborts
+`import build123d` entirely. Windows 11 ships `mstmc.ttf` — a touch-keyboard
+stub, not a real font — which triggers exactly this. The symptom is a
+`TTLibError: Not a TrueType or OpenType font (bad sfntVersion)` traceback
+from inside `import`, and it looks like a broken install rather than a bad
+font.
+
+`brep.py` filters unreadable font files out of the folder scan for the
+duration of the import, then restores `glob.glob`. Every readable font still
+registers. It also raises the logging threshold during that window, because
+fontTools reports malformed tables at `log.error` (not warning) for several
+stock fonts, and that noise would otherwise bury the verification output.
+
+So: **`import brep`, never `import build123d` directly.** First import costs
+~6 s (OCCT plus the font scan); operations after that are milliseconds.
+
+## 2. Selectors — the part that actually goes wrong
+
+Picking the wrong edges is the dominant failure mode of scripted B-rep, and
+the bad outcomes are asymmetric: a wrong selection either throws an opaque
+OCCT error, or silently rounds an edge you did not mean and you find out when
+the part comes off the printer.
+
+### Built-in selection
+
+```python
+part.edges()                                  # every edge
+part.faces()                                  # every face
+part.vertices()
+
+.filter_by(Axis.Z)                            # edges PARALLEL to Z
+.filter_by(GeomType.CIRCLE)                   # arcs and circles
+.filter_by(lambda e: e.length > 10)           # arbitrary predicate
+
+.group_by(Axis.Z)                             # buckets by Z position
+.group_by(Axis.Z)[-1]                         # the highest bucket
+.group_by(Axis.Z)[0]                          # the lowest
+
+.sort_by(Axis.Z)[-1]                          # single extreme item
+.sort_by(SortBy.AREA)[-1]                      # biggest face
+.sort_by(SortBy.LENGTH)
+```
+
+`filter_by(Axis.Z)` means *parallel to Z* — the vertical edges of an upright
+box, the ones you round. `group_by(Axis.Z)[-1]` means *at the top* — the rim.
+Confusing the two is a common and silent error.
+
+### Helpers in `brep.py`
+
+| helper | returns |
+|---|---|
+| `vertical_edges(part)` | edges parallel to Z |
+| `top_edges(part)` / `bottom_edges(part)` | highest / lowest Z group |
+| `top_face(part)` / `bottom_face(part)` | single extreme face — the usual `openings=` argument |
+| `circular_edges(part, radius=None)` | circles, optionally of one radius (bore rims) |
+| `edge_loops(edges)` | partition into connected loops, largest footprint first |
+| `outer_of(edges)` / `inner_of(edges)` | the outer loop / everything else |
+
+### The two-loop trap
+
+After shelling, a rim carries **two** loops at the same height — outer and
+inner — and `top_edges()` hands you both. Chamfering both eats the wall from
+each side at once: on a 2.4 mm wall a 0.8 mm chamfer leaves 0.8 mm of land.
+Use `outer_of(top_edges(part))`.
+
+Do **not** separate them by distance from the Z axis. On a rounded rectangle
+the outer loop's own radial range — centre of a long side out to the centre
+of a corner arc — overlaps the inner loop's, so any radial threshold mixes
+them. (This was a real bug in an earlier version of `outer_of`: it returned
+12 of 16 edges and the rim chamfer quietly removed twice the intended
+material.) `edge_loops()` groups by shared vertices instead, which is
+topological and correct for any profile.
+
+### Proving a selection is right
+
+Selection bugs do not raise. Check them by differential volume — build twice
+and confirm the delta matches what the feature should remove:
+
+```python
+v0 = build(dict(P, rim_cham=0.0)).volume
+v1 = build(P).volume
+# a chamfer of side c along a loop of length L removes about L * c^2 / 2
+expected = outer_perimeter * P["rim_cham"] ** 2 / 2
+assert abs((v0 - v1) - expected) / expected < 0.05
+```
+
+Also assert `solid_count(part) == 1` whenever the part should be one piece —
+more than one usually means a boss is floating clear of the floor, or a
+boolean did not merge.
+
+## 3. Operations and their failure modes
+
+### fillet
+
+```python
+part = B.safe_fillet(part, B.vertical_edges(part), radius=4)
+```
+
+Fails when the radius exceeds the thinnest adjacent wall, when neighbouring
+fillets would overlap, or when it would consume a whole face. OCCT's own
+error says none of this; `safe_fillet` catches it, runs `max_fillet()` by
+bisection, and tells you the largest radius that works here.
+
+```python
+r = B.max_fillet(part, B.vertical_edges(part)) * 0.8   # stay off the limit
+```
+
+**Fillet the solid before shelling.** Rounding after shelling asks the fillet
+to negotiate a thin wall instead of a solid corner, which is slower and often
+fails.
+
+### chamfer
+
+```python
+part = B.safe_chamfer(part, B.bottom_edges(part), length=0.6)
+```
+
+A 0.4–0.8 mm chamfer on the bottom outer edge is elephant-foot relief and is
+almost always worth adding. The bottom of a shelled part has only one loop
+(the floor is solid), so `bottom_edges()` is unambiguous there — unlike the
+top.
+
+### shell (`offset`)
+
+```python
+part = B.offset(part, amount=-2.4, openings=B.top_face(part))
+```
+
+Negative `amount` is inward. `openings` takes the face(s) to leave open —
+omit it and you get a sealed hollow with no way in. Fails when the wall
+exceeds the smallest internal radius: an inner corner radius is the outer
+radius minus the wall, so `corner_r` must exceed `wall`, and the model should
+assert that (`wall_check("inner corner radius", corner_r - wall, 0.5)`).
+
+**Never shell a loft** — see below.
+
+### loft
+
+```python
+with B.BuildPart() as bp:
+    with B.BuildSketch(B.Plane.XY):
+        B.RectangleRounded(70, 45, 6)
+    with B.BuildSketch(B.Plane.XY.offset(65)):
+        B.Circle(25)
+    B.loft()
+part = bp.part
+```
+
+Loft has **no algebra-mode form**. It consumes the sketches pending on a
+`BuildPart`, in the order added, so it must run inside the builder context.
+
+To give a loft a wall, **loft the outer profiles, loft the inner profiles,
+and subtract** — do not `offset()` it. Offsetting a doubly-curved lofted
+surface is slow and frequently fails outright, and subtracting gives you
+exact control of the wall at both ends:
+
+```python
+body = outer_loft - inner_loft      # inner profiles inset by the wall,
+                                    # extended past both ends so it cuts clean
+```
+
+Extend the inner loft a millimetre beyond each end of the outer one, or the
+coincident end faces leave zero-thickness slivers.
+
+Profiles must have compatible orientation; a rectangle lofted to a circle is
+fine, but reversing one profile's winding produces a twisted, self-
+intersecting solid that still "builds".
+
+### revolve / sweep
+
+```python
+with B.BuildPart() as bp:
+    with B.BuildSketch(B.Plane.XZ):
+        ...                          # profile must not cross the axis
+    B.revolve(axis=B.Axis.Z)
+```
+
+A profile touching the axis is fine; one crossing it is not.
+
+## 4. Order of operations
+
+This order avoids most failures:
+
+1. Build the solid outer form (primitives, booleans).
+2. **Fillet** the outer edges while it is still solid.
+3. **Shell** it (`offset` with `openings`).
+4. **Chamfer** rims and the base — use `outer_of()` on the top.
+5. Add internal features — bosses, ribs — after shelling, or they get
+   hollowed too.
+6. Subtract bores and ports last, so they cut through everything cleanly.
+
+## 5. Tessellation and verification
+
+`export_verified()` does the whole gate:
+
+```python
+B.export_verified(part, "part.stl", "part",
+                  tolerance=0.01, angular_tolerance=0.1,
+                  expect_bbox=((x0, y0, z0), (x1, y1, z1)))
+```
+
+The kernel knows the **exact** volume, so the check is "did tessellation lose
+anything it should not have" — no hand computation needed, unlike the mesh
+backend. Measured on the shipped examples: 0.007% loss on the enclosure,
+0.036% on the duct. The default gate is 0.5%; if a part exceeds that, the
+tessellation is too coarse for its curvature — lower `tolerance`, don't raise
+the gate.
+
+| `tolerance` | use |
+|---|---|
+| 0.05 | draft, fast preview |
+| 0.01 | default; good for FDM |
+| 0.002 | resin, or small parts with tight curvature |
+
+`angular_tolerance` (radians) controls facets around tight curves; 0.1 is
+fine, drop to 0.05 for small-radius fillets that must look smooth.
+
+A failed verification **deletes the STL** rather than leaving a wrong part on
+disk.
+
+Use `wall_check()` for dimensions the bounding box cannot see — wall
+thickness, bore land, clearance to a rim. Those are the values that make a
+part unprintable and they are invisible in bbox and volume alike.
+
+## 6. Builder mode vs algebra mode
+
+build123d offers two styles. `brep.py` re-exports both.
+
+**Algebra** — expressions, `+` and `-`. Preferred here: it composes, is easy
+to factor into functions, and reads like the feature tree.
+
+```python
+body = B.Box(40, 30, 10) + B.Pos(0, 0, 10) * B.Cylinder(5, 8)
+body -= B.Pos(10, 0, 0) * B.Cylinder(2, 30)
+```
+
+**Builder** — `with BuildPart()` contexts, required for `loft`, `revolve`,
+`sweep` and anything sketch-driven. Take `bp.part` out at the end and go back
+to algebra.
+
+Mixing is fine and normal: build lofted pieces in builder blocks, combine
+them with `+` and `-`.

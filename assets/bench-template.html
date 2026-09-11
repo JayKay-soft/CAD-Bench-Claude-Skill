@@ -1,0 +1,465 @@
+<title>CAD Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+  :root{
+    --paper:#F7F8FA; --panel:#FFFFFF; --ink:#16202B; --ink-2:#5A6873;
+    --rule:#C6CFD8; --rule-soft:#E2E8ED;
+    --part:#6E9CC4; --part-line:#3D6B93; --void:#EDF1F5;
+    --warn:#C2410C; --warn-bg:#FDF0E8; --ok:#2F7A5A; --ok-bg:#EAF3EE;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --paper:#11161C; --panel:#171E26; --ink:#E4EAF0; --ink-2:#93A1AE;
+      --rule:#2B3540; --rule-soft:#212A33;
+      --part:#4A7CA3; --part-line:#8FB8D6; --void:#1C242D;
+      --warn:#E8834F; --warn-bg:#2A1A12; --ok:#5FB08A; --ok-bg:#122019;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#11161C; --panel:#171E26; --ink:#E4EAF0; --ink-2:#93A1AE;
+    --rule:#2B3540; --rule-soft:#212A33;
+    --part:#4A7CA3; --part-line:#8FB8D6; --void:#1C242D;
+    --warn:#E8834F; --warn-bg:#2A1A12; --ok:#5FB08A; --ok-bg:#122019;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);
+       font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.55;
+       padding:28px 24px 40px}
+  .wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+  header{display:flex;flex-direction:column;gap:6px;
+         border-bottom:1px solid var(--rule);padding-bottom:16px}
+  h1{margin:0;font-size:23px;font-weight:500;letter-spacing:-.01em;text-wrap:balance}
+  .sub{margin:0;color:var(--ink-2);font-size:14px;max-width:66ch}
+  .picker{display:flex;gap:0;border:1px solid var(--rule);border-radius:6px;
+          overflow:hidden;width:fit-content;max-width:100%;flex-wrap:wrap}
+  .picker button{margin:0;border:0;border-right:1px solid var(--rule);border-radius:0;
+                 padding:9px 16px;background:var(--panel);color:var(--ink-2);font-size:13px}
+  .picker button:last-child{border-right:0}
+  .picker button[aria-pressed="true"]{background:var(--part-line);color:#fff}
+  .file{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;color:var(--ink-2)}
+  .cols{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
+  @media (max-width:860px){.cols{grid-template-columns:1fr}}
+  .group{display:flex;flex-direction:column;gap:2px;margin-bottom:18px}
+  .glabel{font-size:11px;letter-spacing:.13em;text-transform:uppercase;
+          color:var(--ink-2);padding-bottom:7px;margin-bottom:6px;
+          border-bottom:1px solid var(--rule-soft)}
+  .row{display:grid;grid-template-columns:1fr 92px 62px;gap:10px;
+       align-items:center;padding:5px 0}
+  .row label{font-size:13px}
+  .row output{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;
+              text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  input[type=range]{width:100%;accent-color:var(--part-line);background:transparent}
+  input[type=range]:focus-visible{outline:2px solid var(--part-line);outline-offset:3px}
+  .stage{background:var(--panel);border:1px solid var(--rule);border-radius:6px;
+         padding:14px;overflow-x:auto}
+  svg{display:block;width:100%;height:auto}
+  .derived{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+           gap:1px;background:var(--rule-soft);border:1px solid var(--rule-soft);
+           border-radius:6px;overflow:hidden;margin-top:14px}
+  .d{background:var(--panel);padding:9px 11px}
+  .d span{display:block;font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-2)}
+  .d b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;font-size:15px;
+       font-variant-numeric:tabular-nums}
+  .checks{display:flex;flex-direction:column;gap:7px;margin-top:14px}
+  .chk{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:baseline;
+       font-size:13px;padding:9px 12px;border-radius:5px;border:1px solid transparent}
+  .chk.pass{background:var(--ok-bg);border-color:var(--ok)}
+  .chk.fail{background:var(--warn-bg);border-color:var(--warn)}
+  .chk i{font-style:normal;font-weight:500}
+  .chk.pass i{color:var(--ok)} .chk.fail i{color:var(--warn)}
+  .chk em{font-style:normal;font-family:"IBM Plex Mono",ui-monospace,monospace;
+          font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  .io{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:860px){.io{grid-template-columns:1fr}}
+  .out{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+  .out h2{margin:0 0 4px;font-size:13px;font-weight:500;letter-spacing:.03em}
+  .out p{margin:0 0 11px;color:var(--ink-2);font-size:13px}
+  pre{margin:0;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;
+      line-height:1.75;white-space:pre;overflow-x:auto;color:var(--ink)}
+  textarea{width:100%;min-height:112px;resize:vertical;padding:10px 12px;border-radius:5px;
+           border:1px solid var(--rule);background:var(--paper);color:var(--ink);
+           font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.6}
+  textarea:focus-visible{outline:2px solid var(--part-line);outline-offset:1px}
+  button{font:inherit;font-size:13px;padding:7px 15px;border-radius:5px;
+         border:1px solid var(--rule);background:var(--panel);color:var(--ink);
+         cursor:pointer;margin-top:12px}
+  button:hover{border-color:var(--part-line)}
+  button:focus-visible{outline:2px solid var(--part-line);outline-offset:2px}
+  .msg{font-size:12.5px;margin-top:9px;min-height:1.2em}
+  .row-btn{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .primary{border-color:var(--part-line);background:var(--part-line);color:#fff}
+  .primary:hover{filter:brightness(1.08)}
+  .handed{font-size:12px;color:var(--ink-2);margin-top:9px;min-height:1.2em}
+  .handed b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:500;color:var(--ink)}
+  .msg.err{color:var(--warn)} .msg.ok{color:var(--ok)}
+  footer{color:var(--ink-2);font-size:12.5px;border-top:1px solid var(--rule);padding-top:14px;max-width:78ch}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>CAD Bench</h1>
+    <p class="sub">Set a part's dimensions against the constraints that actually bind, watch the checks go green, then hand the values back to Claude to regenerate the STL. Every part here pairs with a model in <span class="file">models/&lt;part&gt;.py</span>. Nothing on this page needs an account or a CAD tool.</p>
+    <div class="picker" id="picker"></div>
+  </header>
+
+  <div class="cols">
+    <div id="controls"></div>
+    <div>
+      <div class="stage"><svg id="dwg" viewBox="0 0 620 400" role="img" aria-label="Orthographic views of the selected part"></svg></div>
+      <div class="derived" id="derived"></div>
+      <div class="checks" id="checks"></div>
+    </div>
+  </div>
+
+  <div class="io">
+    <div class="out">
+      <h2>Load current values</h2>
+      <p>Paste a <span class="file">const NAME = value * MM;</span> block to start the sliders from where the part is now.</p>
+      <textarea id="paste" spellcheck="false" placeholder="const PLATE_X = 60 * MM;&#10;const BOSS_D = 10 * MM;"></textarea>
+      <button id="load">Load into sliders</button>
+      <div class="msg" id="msg"></div>
+    </div>
+    <div class="out">
+      <h2>Parameters for the model</h2>
+      <p>These names match the model's <span class="file">PARAMS</span> keys. Hand them over and Claude reads them straight from this page &#8212; or copy them to paste yourself.</p>
+      <pre id="consts"></pre>
+      <div class="row-btn">
+        <button id="copy">Copy parameters</button>
+        <button id="send" class="primary" hidden>Hand these to Claude</button>
+      </div>
+      <div class="handed" id="handed"></div>
+    </div>
+  </div>
+
+  <footer id="note"></footer>
+</div>
+
+<script>
+const S=(x,y)=>x.toFixed(1)+","+y.toFixed(1);
+const A=(t)=>`fill="var(--part)" stroke="var(--part-line)" stroke-width="1"${t||""}`;
+const V=`fill="var(--void)" stroke="var(--part-line)" stroke-width="1"`;
+const G=`fill="none" stroke="var(--rule)" stroke-width="1" stroke-dasharray="4 4"`;
+const pg=(pts,a)=>`<polygon points="${pts.map(p=>S(p[0],p[1])).join(" ")}" ${a||A()}/>`;
+const rc=(x,y,w,h,a)=>`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.abs(w).toFixed(1)}" height="${Math.abs(h).toFixed(1)}" ${a||A()}/>`;
+const ci=(x,y,r,a)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(r,0.4).toFixed(1)}" ${a||V}/>`;
+const ln=(x1,y1,x2,y2)=>`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--rule)" stroke-width="1" stroke-dasharray="4 4"/>`;
+const tx=(x,y,s,sz)=>`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${sz||11}" fill="var(--ink-2)" font-family="IBM Plex Sans,sans-serif">${s}</text>`;
+const cap=(x,y,s)=>`<text x="${x}" y="${y}" font-size="11" fill="var(--ink-2)" letter-spacing="1.4">${s}</text>`;
+
+// ============================================================
+// PARTS -- one entry per part. Add a new key for each new part; keep the
+// existing ones untouched. Each slider id must equal the model PARAMS key.
+// ============================================================
+const PARTS = {
+
+"boss-plate":{
+  label:"Boss plate", file:"models/boss_plate.py",
+  note:"The boss diameter is set by what the bore needs around it, not by strength: a heat-set insert pushes plastic outward, so the boss wall wants at least 2 mm. The bosses stand proud of the plate so the mating part rests on them, not on the plate face. Hole inset must keep the bore clear of the plate edge and keep opposite bosses from overlapping.",
+  params:[
+    {id:"plate_x",fs:"PLATE_X",u:"MM",g:"Plate",label:"Long side",min:40,max:200,step:1,val:60},
+    {id:"plate_y",fs:"PLATE_Y",u:"MM",g:"Plate",label:"Short side",min:30,max:160,step:1,val:40},
+    {id:"plate_t",fs:"PLATE_T",u:"MM",g:"Plate",label:"Thickness",min:2,max:8,step:.5,val:3},
+    {id:"inset",fs:"INSET",u:"MM",g:"Plate",label:"Hole inset from edges",min:3,max:20,step:.5,val:8},
+    {id:"boss_d",fs:"BOSS_D",u:"MM",g:"Boss",label:"Diameter",min:5,max:24,step:.5,val:10},
+    {id:"boss_h",fs:"BOSS_H",u:"MM",g:"Boss",label:"Height",min:4,max:40,step:1,val:12},
+    {id:"bore_d",fs:"BORE_D",u:"MM",g:"Boss",label:"Bore diameter",min:2,max:10,step:.1,val:4}
+  ],
+  derive(p){
+    return {
+      hx:p.plate_x/2-p.inset, hy:p.plate_y/2-p.inset,
+      boss_wall:(p.boss_d-p.bore_d)/2,
+      proud:p.boss_h-p.plate_t,
+      edge:p.inset-p.boss_d/2,
+      pitchX:p.plate_x-2*p.inset, pitchY:p.plate_y-2*p.inset,
+      vol:p.plate_x*p.plate_y*p.plate_t
+          +4*Math.PI*Math.pow(p.boss_d/2,2)*(p.boss_h-p.plate_t)
+          -4*Math.PI*Math.pow(p.bore_d/2,2)*p.boss_h
+    };
+  },
+  cards:d=>[["Boss wall",d.boss_wall.toFixed(2)],
+            ["Boss proud of plate",d.proud.toFixed(1)],
+            ["Boss rim to edge",d.edge.toFixed(2)],
+            ["Hole pitch X",d.pitchX.toFixed(1)],
+            ["Hole pitch Y",d.pitchY.toFixed(1)],
+            ["Volume",d.vol.toFixed(0)+" mm³"]],
+  checks(p,d){
+    return [
+      [d.boss_wall>=2,"Boss wall survives a heat-set insert",
+        d.boss_wall.toFixed(2)+" mm, want ≥ 2"],
+      [d.proud>=1,"Boss stands proud of the plate",
+        d.proud.toFixed(1)+" mm above the face"],
+      [d.edge>=1.5,"Boss sits fully on the plate",
+        d.edge.toFixed(2)+" mm rim to edge"],
+      [p.inset-p.bore_d/2>=2,"Bore clears the plate edge",
+        (p.inset-p.bore_d/2).toFixed(2)+" mm"],
+      [d.hx>p.boss_d/2 && d.hy>p.boss_d/2,"Opposite bosses do not overlap",
+        "centres "+d.pitchX.toFixed(0)+" × "+d.pitchY.toFixed(0)+" mm apart"],
+      [p.boss_h>p.bore_d,"Bore is deeper than it is wide",
+        p.boss_h.toFixed(0)+" mm deep, Ø"+p.bore_d.toFixed(1)]
+    ];
+  },
+  draw(p,d){
+    const o=[];
+    // ---- TOP VIEW ----
+    const s1=Math.min(330/p.plate_x, 250/p.plate_y);
+    const cx=30+p.plate_x/2*s1, cy=150;
+    const T=(x,y)=>[cx+x*s1, cy-y*s1];
+    o.push(cap(26,20,"TOP VIEW"));
+    o.push(rc(...T(-p.plate_x/2,p.plate_y/2), p.plate_x*s1, p.plate_y*s1));
+    for(const sx of [1,-1]) for(const sy of [1,-1]){
+      const h=T(sx*d.hx, sy*d.hy);
+      o.push(`<circle cx="${h[0].toFixed(1)}" cy="${h[1].toFixed(1)}" r="${(p.boss_d/2*s1).toFixed(1)}" ${G}/>`);
+      o.push(ci(h[0],h[1], p.bore_d/2*s1));
+    }
+    o.push(tx(...T(-p.plate_x/2+2, -p.plate_y/2-4), p.plate_x+" × "+p.plate_y));
+    // ---- SECTION THROUGH ONE BOSS ----
+    const px=400, s2=Math.min(150/p.boss_d, 150/p.boss_h), bz=300;
+    const Q=(r,z)=>[px+r*s2, bz-z*s2];
+    o.push(cap(px-40,20,"BOSS, SECTION"));
+    o.push(rc(...Q(-p.boss_d/2,p.boss_h), p.boss_d*s2, p.boss_h*s2));
+    o.push(rc(...Q(-p.plate_x/2/6, p.plate_t), (p.plate_x/6)*s2, p.plate_t*s2));
+    o.push(rc(...Q(-p.bore_d/2, p.boss_h), p.bore_d*s2, p.boss_h*s2, V));
+    o.push(tx(px-36, bz+16, "Ø"+p.boss_d+" × "+p.boss_h+"  bore Ø"+p.bore_d));
+    return o.join("");
+  }
+},
+
+"enclosure":{
+  label:"Enclosure", file:"models/enclosure.py",
+  note:"A B-rep part: the corners are real fillets and the cavity is a real shell, neither of which mesh CSG can represent honestly. Order matters — fillet the solid, THEN shell it; rounding after shelling makes the fillet negotiate a 2.4 mm wall instead of a solid corner. The inner corner radius is the outer radius minus the wall, so corner_r must stay clear of the wall or the shell fails. The rim chamfer must leave land on a wall that is already thin.",
+  params:[
+    {id:"width",fs:"WIDTH",u:"MM",g:"Shell",label:"Width (X)",min:40,max:200,step:1,val:80},
+    {id:"depth",fs:"DEPTH",u:"MM",g:"Shell",label:"Depth (Y)",min:30,max:160,step:1,val:60},
+    {id:"height",fs:"HEIGHT",u:"MM",g:"Shell",label:"Height (Z)",min:12,max:100,step:1,val:30},
+    {id:"wall",fs:"WALL",u:"MM",g:"Shell",label:"Wall thickness",min:1.2,max:6,step:.1,val:2.4},
+    {id:"corner_r",fs:"CORNER_R",u:"MM",g:"Shell",label:"Corner fillet",min:1,max:25,step:.5,val:6},
+    {id:"rim_cham",fs:"RIM_CHAM",u:"MM",g:"Edges",label:"Rim chamfer",min:0,max:3,step:.1,val:.8},
+    {id:"base_cham",fs:"BASE_CHAM",u:"MM",g:"Edges",label:"Base chamfer",min:0,max:2,step:.1,val:.6},
+    {id:"boss_d",fs:"BOSS_D",u:"MM",g:"Bosses",label:"Diameter",min:4,max:16,step:.5,val:7},
+    {id:"bore_d",fs:"BORE_D",u:"MM",g:"Bosses",label:"Bore",min:1.5,max:8,step:.1,val:2.9},
+    {id:"boss_inset",fs:"BOSS_INSET",u:"MM",g:"Bosses",label:"Inset from walls",min:5,max:40,step:.5,val:11},
+    {id:"port_w",fs:"PORT_W",u:"MM",g:"Cable port",label:"Width",min:4,max:60,step:1,val:16},
+    {id:"port_h",fs:"PORT_H",u:"MM",g:"Cable port",label:"Height",min:3,max:40,step:1,val:9},
+    {id:"port_z",fs:"PORT_Z",u:"MM",g:"Cable port",label:"Centre height",min:2,max:60,step:.5,val:8}
+  ],
+  derive(p){
+    const rr=p.corner_r, area=p.width*p.depth-(4-Math.PI)*rr*rr;
+    const iw=p.width-2*p.wall, id_=p.depth-2*p.wall, ir=rr-p.wall;
+    const iarea=iw*id_-(4-Math.PI)*Math.max(ir,0)*Math.max(ir,0);
+    return {
+      inner_w:iw, inner_d:id_, inner_h:p.height-p.wall, inner_r:ir,
+      boss_wall:(p.boss_d-p.bore_d)/2,
+      boss_h:p.height-p.wall-2,
+      bx:p.width/2-p.boss_inset, by:p.depth/2-p.boss_inset,
+      port_top:p.port_z+p.port_h/2, port_bot:p.port_z-p.port_h/2,
+      rim_land:p.wall-p.rim_cham,
+      vol:area*p.height-iarea*(p.height-p.wall)
+    };
+  },
+  cards:d=>[["Inner W × D",d.inner_w.toFixed(1)+" × "+d.inner_d.toFixed(1)],
+            ["Inner height",d.inner_h.toFixed(1)],
+            ["Inner corner R",d.inner_r.toFixed(2)],
+            ["Boss wall",d.boss_wall.toFixed(2)],
+            ["Boss height",d.boss_h.toFixed(1)],
+            ["Rim land left",d.rim_land.toFixed(2)],
+            ["Port spans Z",d.port_bot.toFixed(1)+"–"+d.port_top.toFixed(1)],
+            ["Volume ≈",d.vol.toFixed(0)+" mm³"]],
+  checks(p,d){
+    return [
+      [d.inner_r>=0.5,"Shell survives the corner fillet",
+        d.inner_r>=0.5?"inner R "+d.inner_r.toFixed(2)+" mm"
+                      :"corner_r "+p.corner_r+" ≤ wall "+p.wall+" — shell will fail"],
+      [p.corner_r<=Math.min(p.width,p.depth)/2,"Corner fillet fits the footprint",
+        p.corner_r.toFixed(1)+" of "+(Math.min(p.width,p.depth)/2).toFixed(1)+" max"],
+      [d.rim_land>=0.8,"Rim chamfer leaves land",
+        d.rim_land.toFixed(2)+" mm of "+p.wall.toFixed(1)+" mm wall"],
+      [p.base_cham<p.wall,"Base chamfer stays in the floor",
+        p.base_cham.toFixed(1)+" of "+p.wall.toFixed(1)+" mm"],
+      [d.boss_wall>=1.2,"Boss wall takes a screw",
+        d.boss_wall.toFixed(2)+" mm, want ≥ 1.2"],
+      [d.bx+p.boss_d/2 <= d.inner_w/2-0.5 && d.by+p.boss_d/2 <= d.inner_d/2-0.5,
+        "Bosses clear the cavity walls",
+        "reach "+(d.bx+p.boss_d/2).toFixed(1)+" × "+(d.by+p.boss_d/2).toFixed(1)
+        +" of "+(d.inner_w/2).toFixed(1)+" × "+(d.inner_d/2).toFixed(1)],
+      [d.boss_h>0,"Boss fits under the rim",d.boss_h.toFixed(1)+" mm tall"],
+      [d.port_top<=p.height-p.wall-1,"Port clears the rim",
+        (p.height-p.wall-d.port_top).toFixed(1)+" mm of land above"],
+      [d.port_bot>=p.wall+0.5,"Port clears the floor",
+        (d.port_bot-p.wall).toFixed(1)+" mm above the inside floor"],
+      [p.port_w<=d.inner_w-2,"Port fits the wall it cuts",
+        p.port_w.toFixed(0)+" of "+d.inner_w.toFixed(0)+" mm"]
+    ];
+  },
+  draw(p,d){
+    const o=[];
+    // ---- TOP VIEW: outer rounded rect, inner cavity, bosses ----
+    const s=Math.min(300/p.width, 210/p.depth);
+    const cx=26+p.width/2*s, cy=132;
+    const T=(x,y)=>[cx+x*s, cy-y*s];
+    const rr=(x,y,w,h,r,a)=>{const q=T(x,y);
+      return `<rect x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(w*s).toFixed(1)}" height="${(h*s).toFixed(1)}" rx="${(r*s).toFixed(1)}" ${a||A()}/>`;};
+    o.push(cap(24,20,"TOP VIEW"));
+    o.push(rr(-p.width/2, p.depth/2, p.width, p.depth, p.corner_r));
+    o.push(rr(-d.inner_w/2, d.inner_d/2, d.inner_w, d.inner_d, Math.max(d.inner_r,0), V));
+    for(const sx of [1,-1]) for(const sy of [1,-1]){
+      const h=T(sx*d.bx, sy*d.by);
+      o.push(`<circle cx="${h[0].toFixed(1)}" cy="${h[1].toFixed(1)}" r="${(p.boss_d/2*s).toFixed(1)}" ${A()}/>`);
+      o.push(ci(h[0],h[1], p.bore_d/2*s));
+    }
+    const pw=T(-p.port_w/2, -p.depth/2);
+    o.push(rc(pw[0], pw[1]-2, p.port_w*s, 4, `fill="none" stroke="var(--warn)" stroke-width="1.2" stroke-dasharray="3 2"`));
+    o.push(tx(...T(-p.width/2+2, -p.depth/2-5), p.width+" × "+p.depth+" × "+p.height));
+    // ---- SECTION through the port wall ----
+    const bx=360, bw=230, by0=40, bh=200;
+    const s2=Math.min(bw/p.width, bh/p.height);
+    const R=(x,z)=>[bx+(x+p.width/2)*s2, by0+bh-z*s2];
+    o.push(cap(bx,20,"SECTION"));
+    o.push(rc(...R(-p.width/2,p.height), p.width*s2, p.height*s2));
+    o.push(rc(...R(-d.inner_w/2,p.height+0.01), d.inner_w*s2, d.inner_h*s2, V));
+    for(const sx of [1,-1]){
+      o.push(rc(...R(sx*d.bx-p.boss_d/2, p.wall+d.boss_h), p.boss_d*s2, d.boss_h*s2));
+      o.push(rc(...R(sx*d.bx-p.bore_d/2, p.wall+d.boss_h), p.bore_d*s2, d.boss_h*s2, V));
+    }
+    const py=R(-p.width/2, d.port_top)[1];
+    o.push(ln(bx, py, bx+p.width*s2, py));
+    o.push(tx(bx+2, py-3, "port top"));
+    o.push(tx(bx, by0+bh+16, "wall "+p.wall+"   fillet R"+p.corner_r+"   inner R"+d.inner_r.toFixed(1)));
+    return o.join("");
+  }
+}
+
+};
+
+let KEY = "boss-plate";
+const el=id=>document.getElementById(id);
+const P=()=>PARTS[KEY];
+const vals=()=>{const o={}; P().params.forEach(q=>o[q.id]=parseFloat(el(q.id).value)); return o;};
+const fmt=(n,d=2)=>Number(n.toFixed(d)).toString();
+
+function buildPicker(){
+  el("picker").innerHTML = Object.entries(PARTS).map(([k,v])=>
+    `<button data-k="${k}" aria-pressed="${k===KEY}">${v.label}</button>`).join("");
+  el("picker").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+    KEY=b.dataset.k; buildControls(); render(); buildPicker();
+  }));
+}
+
+function buildControls(){
+  const groups=[];
+  P().params.forEach(q=>{ if(!groups.includes(q.g)) groups.push(q.g); });
+  el("controls").innerHTML = groups.map(g=>
+    `<div class="group"><div class="glabel">${g}</div>` +
+    P().params.filter(q=>q.g===g).map(q=>{
+      let saved=null; try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}")[KEY]||{})[q.id]; }catch(e){}
+      const v = saved!==undefined && saved!==null ? saved : q.val;
+      return `<div class="row"><label for="${q.id}">${q.label}</label>`+
+        `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}">`+
+        `<output id="o_${q.id}"></output></div>`;
+    }).join("") + `</div>`).join("");
+  P().params.forEach(q=>el(q.id).addEventListener("input", render));
+  el("note").textContent = P().note;
+}
+
+function render(){
+  const part=P(), p=vals(), d=part.derive(p);
+  part.params.forEach(q=>{
+    el("o_"+q.id).textContent = fmt(p[q.id]) + (q.u==="DEG"?"°":" mm");
+  });
+  el("dwg").innerHTML = part.draw(p,d);
+  el("derived").innerHTML = part.cards(d).map(([k,x])=>
+    `<div class="d"><span>${k}</span><b>${x}</b></div>`).join("");
+  // A check reading an undefined field (`d.foo` where foo lives on `p`) makes
+  // NaN, and NaN comparisons are false -- so the row goes red and looks like
+  // a real constraint failure instead of a typo. Surface it as what it is.
+  const rows = part.checks(p,d);
+  el("checks").innerHTML = rows.map(([ok,label,note])=>{
+    const broken = String(note).includes("NaN") || typeof ok !== "boolean";
+    return `<div class="chk ${broken?"fail":(ok?"pass":"fail")}"><i>${broken?"!":(ok?"✓":"✗")}</i>`+
+      `<span>${label}${broken?" — CHECK IS BROKEN (NaN), not a real failure":""}</span>`+
+      `<em>${note}</em></div>`;
+  }).join("");
+  el("consts").textContent = part.params.filter(q=>q.fs)
+    .map(q=>`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])} * ${q.u};`).join("\n")
+    + `\n// ${part.file}`;
+  try{ const all=JSON.parse(localStorage.getItem("cadbench")||"{}");
+       all[KEY]=p; localStorage.setItem("cadbench", JSON.stringify(all)); }catch(e){}
+}
+
+function say(t,c){ const m=el("msg"); m.textContent=t; m.className="msg "+(c||""); }
+el("paste").addEventListener("input",()=>say(""));
+el("load").addEventListener("click",()=>{
+  const raw=el("paste").value;
+  if(!raw.trim()){ say("Paste a constant block first.","err"); return; }
+  const hits=[...raw.matchAll(/const\s+(\w+)\s*=\s*(-?[\d.]+)\s*\*\s*(?:MM|DEG)/g)];
+  if(!hits.length){ say("No 'const NAME = value * MM;' lines in that.","err"); return; }
+  const byFs={}; P().params.forEach(q=>{ if(q.fs) byFs[q.fs]=q; });
+  const ok=[],clamped=[],other=[];
+  for(const [,name,num] of hits){
+    const q=byFs[name];
+    if(!q){ other.push(name); continue; }
+    const n=parseFloat(num), c=Math.min(q.max,Math.max(q.min,n));
+    el(q.id).value=c;
+    (c===n?ok:clamped).push(name+(c===n?"":" → "+c));
+  }
+  render();
+  if(!ok.length && !clamped.length){
+    say("None of those belong to "+P().label+".","err"); return; }
+  let m=`Loaded ${ok.length+clamped.length} value${ok.length+clamped.length===1?"":"s"}.`;
+  if(clamped.length) m+=` Clamped to slider range: ${clamped.join(", ")}.`;
+  if(other.length) m+=` Not driven here: ${other.join(", ")}.`;
+  say(m, clamped.length?"err":"ok");
+});
+el("copy").addEventListener("click",async()=>{
+  const b=el("copy");
+  try{ await navigator.clipboard.writeText(el("consts").textContent); b.textContent="Copied"; }
+  catch(e){ b.textContent="Select and copy"; }
+  setTimeout(()=>b.textContent="Copy parameters",1800);
+});
+
+buildPicker(); buildControls(); render();
+
+// ---- Handover ------------------------------------------------------
+// The sliders live in this browser and never reach Claude on their own.
+// This writes the current part's values to the artifact's own store, where
+// Claude reads them back by name. On a BUTTON, not on every input: one row
+// per part, written when the checks look right.
+let DB = null;
+function handedNote(t, cls){ const h=el("handed"); h.innerHTML=t; h.className="handed "+(cls||""); }
+
+if (window.claude && typeof window.claude.use === "function") {
+  window.claude.use("db").then(db => {
+    if (!db) return;                       // not granted here -- copy-paste still works
+    DB = db;
+    el("send").hidden = false;
+    db.collection("bench").onSnapshot(snap => {
+      const mine = snap.docs.find(d => d.id === KEY);
+      if (!mine || !mine.exists) { handedNote(""); return; }
+      const d = mine.data() || {};
+      const when = d.savedAt ? new Date(d.savedAt) : null;
+      handedNote("Claude last received this part at <b>" +
+        (when ? when.toLocaleTimeString() : "an unknown time") + "</b>.");
+    }, err => handedNote("Store unavailable (" + err.code + ") -- use Copy parameters.", "err"));
+  });
+}
+
+el("send").addEventListener("click", async () => {
+  if (!DB) return;
+  const b = el("send"), part = P(), p = vals();
+  b.disabled = true; b.textContent = "Handing over…";
+  try {
+    await DB.doc("bench/" + KEY).set({
+      part: KEY, label: part.label, file: part.file,
+      params: p, consts: el("consts").textContent,
+      savedAt: new Date().toISOString()
+    });
+    b.textContent = "Handed over";
+  } catch (e) {
+    handedNote("Could not hand over (" + (e && e.code) + ") -- use Copy parameters.", "err");
+    b.textContent = "Hand these to Claude";
+  } finally {
+    b.disabled = false;
+    setTimeout(() => { b.textContent = "Hand these to Claude"; }, 2200);
+  }
+});
+</script>
