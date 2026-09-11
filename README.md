@@ -50,6 +50,12 @@ rather than hand you a part that's wrong.
 - Node.js on `PATH`, only for `scripts/check_bench.py` (validates a bench
   page's recipes headlessly before you publish them).
 
+## How to use it
+
+See **[HOWTO.md](./HOWTO.md)** for the end-user side of the workflow above —
+what you actually see and do at each step, walked through with one of the
+skill's own worked examples (`models/boss_plate.py`) and its real output.
+
 ## Install
 
 **Option A — one file.** Download [`cad-bench.skill`](./cad-bench.skill) from

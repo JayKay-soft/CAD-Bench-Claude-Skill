@@ -124,6 +124,18 @@ edge set, prove it hit the right edges by differential volume: build with the
 feature at zero, subtract, compare against what it should remove. Recipe in
 `references/verification.md`.
 
+**Watertight + correct volume is not proof there are no slivers.** A boolean
+can pass every gate above while still carrying degenerate (near-zero-area)
+triangles underneath them — measured on a real part, more than once, before
+this was checked directly instead of inferred from a watertight/volume pass
+or from how a tessellation *looked*. Check face area and edge-manifold count
+directly; when a fix needs a tuned offset (a shave, an overlap), sweep a real
+range on every variant the model ships rather than picking one cautious
+number; and when adding a feature to an existing solid, prefer baking it into
+the host's own profile over booleaning two independent tessellations
+together. Full method, with the real numbers from where this went wrong
+twice, in `references/verification.md`.
+
 ### 5. Bench page
 
 One shared CAD Bench artifact, a multi-part picker. First use: publish
@@ -138,11 +150,17 @@ python scripts/check_bench.py <bench.html>
 ```
 
 It runs every recipe headlessly at defaults and at every slider extreme, and
-fails on the one bug this format has: reading `d.plate_x` when `plate_x` is a
-slider gives `undefined`, `undefined >= 2` is an ordinary `false`, and the row
-goes **red like a real constraint failure** — so you tune sliders chasing a
-typo. Sliders are on `p`, computed values on `d`. Field spec and SVG helpers
-are in `references/bench-artifact.md`.
+fails on two classes of bug this format has. One: reading `d.plate_x` when
+`plate_x` is a slider gives `undefined`, `undefined >= 2` is an ordinary
+`false`, and the row goes **red like a real constraint failure** — so you
+tune sliders chasing a typo. Sliders are on `p`, computed values on `d`. Two:
+a `draw()` whose views were scaled to fit their own content with no bound on
+where the result lands, so a caption or a whole second view ends up drawn on
+top of another shape — unreadable, but nothing throws. The checker parses
+the SVG for text mostly covered by a filled shape, and solid shapes heavily
+overlapping each other, at every slider extreme, not just defaults. Field
+spec, the SVG helpers, and how to lay out more than one view without this
+happening are in `references/bench-artifact.md`.
 
 Then hand the user the link: adjust sliders, and when the checks are green
 press **"Hand these to Claude"**.

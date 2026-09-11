@@ -43,11 +43,15 @@
   .glabel{font-size:11px;letter-spacing:.13em;text-transform:uppercase;
           color:var(--ink-2);padding-bottom:7px;margin-bottom:6px;
           border-bottom:1px solid var(--rule-soft)}
-  .row{display:grid;grid-template-columns:1fr 92px 62px;gap:10px;
+  .row{display:grid;grid-template-columns:1fr 92px 76px;gap:10px;
        align-items:center;padding:5px 0}
   .row label{font-size:13px}
-  .row output{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;
-              text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  .numbox{width:100%;font:inherit;font-family:"IBM Plex Mono",ui-monospace,monospace;
+          font-size:13px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);
+          background:var(--paper);border:1px solid var(--rule);border-radius:4px;
+          padding:3px 6px}
+  .numbox:focus-visible{outline:2px solid var(--part-line);outline-offset:1px}
+  .numbox.clamped{border-color:var(--warn)}
   input[type=range]{width:100%;accent-color:var(--part-line);background:transparent}
   input[type=range]:focus-visible{outline:2px solid var(--part-line);outline-offset:3px}
   .stage{background:var(--panel);border:1px solid var(--rule);border-radius:6px;
@@ -146,6 +150,9 @@ const ci=(x,y,r,a)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math
 const ln=(x1,y1,x2,y2)=>`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--rule)" stroke-width="1" stroke-dasharray="4 4"/>`;
 const tx=(x,y,s,sz)=>`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${sz||11}" fill="var(--ink-2)" font-family="IBM Plex Sans,sans-serif">${s}</text>`;
 const cap=(x,y,s)=>`<text x="${x}" y="${y}" font-size="11" fill="var(--ink-2)" letter-spacing="1.4">${s}</text>`;
+// Decimal places implied by a slider's own step (0.1 -> 1, 0.05 -> 2, 1 -> 0).
+// The typed-value box rounds to this, so retyping what's on screen is a no-op.
+const stepDecimals=(step)=>{ const s=String(step), i=s.indexOf("."); return i<0?0:s.length-i-1; };
 
 // ============================================================
 // PARTS -- one entry per part. Add a new key for each new part; keep the
@@ -355,16 +362,45 @@ function buildControls(){
       const v = saved!==undefined && saved!==null ? saved : q.val;
       return `<div class="row"><label for="${q.id}">${q.label}</label>`+
         `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}">`+
-        `<output id="o_${q.id}"></output></div>`;
+        `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"></div>`;
     }).join("") + `</div>`).join("");
-  P().params.forEach(q=>el(q.id).addEventListener("input", render));
+  P().params.forEach(q=>{
+    el(q.id).addEventListener("input", render);
+    const box=el("o_"+q.id);
+    box.addEventListener("change", ()=>commitNumbox(q));
+    box.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); box.blur(); } });
+  });
   el("note").textContent = P().note;
+}
+
+// Typed value: clamp to the slider's own [min,max], then snap to the same
+// step grid the slider itself sits on (multiples of `step` from `min` --
+// verified empirically: assigning an off-grid value to a range input's
+// .value gets silently re-snapped by the browser, so rounding to the
+// step's decimal WIDTH alone (e.g. 0.5 -> 1 decimal) isn't enough --
+// 17.3 on a step-0.5 slider still lands on 17.5, not 17.3). Then push the
+// snapped value back onto the slider and re-render. An unparseable entry
+// (empty, "abc") just reverts to the slider's current value.
+function commitNumbox(q){
+  const box=el("o_"+q.id);
+  const raw=parseFloat(box.value);
+  const n=Number.isFinite(raw)?raw:parseFloat(el(q.id).value);
+  const boundedRaw=Math.min(q.max, Math.max(q.min, n));
+  const steps=Math.round((boundedRaw-q.min)/q.step);
+  const snapped=Number(Math.min(q.max, Math.max(q.min, q.min+steps*q.step))
+    .toFixed(stepDecimals(q.step)));
+  box.classList.toggle("clamped", Number.isFinite(raw) && Math.abs(snapped-raw)>1e-9);
+  el(q.id).value=snapped;
+  render();
+  setTimeout(()=>box.classList.remove("clamped"), 900);
 }
 
 function render(){
   const part=P(), p=vals(), d=part.derive(p);
   part.params.forEach(q=>{
-    el("o_"+q.id).textContent = fmt(p[q.id]) + (q.u==="DEG"?"°":" mm");
+    const box=el("o_"+q.id);
+    if(document.activeElement!==box)   // don't fight the user mid-type
+      box.value = fmt(p[q.id], stepDecimals(q.step)) + (q.u==="DEG"?"°":" mm");
   });
   el("dwg").innerHTML = part.draw(p,d);
   el("derived").innerHTML = part.cards(d).map(([k,x])=>

@@ -69,6 +69,25 @@ unit shown and the `* MM` / `* DEG` suffix in the consts pane. `step` sets the
 slider granularity -- match it to what you can actually hold in a print
 (0.1 mm for fits, 1 mm for gross size, 0.5-1° for angles).
 
+**The value box beside each slider is a typed-entry field, not a read-out.**
+A slider alone can't always land on the exact number a reviewer wants, so the
+template also renders `<input class="numbox" id="o_<id>">` next to it. On
+commit (blur, or Enter) `commitNumbox()` clamps the typed value to `[min,max]`
+-- the same bound the slider enforces -- then snaps it to the slider's own
+step grid (multiples of `step` from `min`), matching what the slider would
+land on if you'd dragged there. **Round to the step grid, not just to the
+step's decimal width**: a step of `0.5` means valid values are `..., 17.0,
+17.5, 18.0, ...`, so typing `17.3` lands on `17.5`, not `17.3` -- rounding
+only the decimal *count* (1 dp) would wrongly accept `17.3`. This was
+verified empirically, not assumed: assigning an off-grid value to a range
+input's `.value` gets silently re-snapped by the browser itself, so the box
+has to replicate that or it would show a number the slider can't actually
+hold. The box briefly gets a `.clamped` (warn-coloured border) class when the
+committed value differs from what was typed, then clears itself. An
+unparseable entry (empty, letters) reverts to the slider's current value
+rather than erroring. Nothing about `params` entries needs to change to get
+this -- it reads `min`/`max`/`step` off the same row spec the slider uses.
+
 ## 3. derive / cards / checks / draw
 
 **`derive(p)` -> object.** Pure function of the slider values. Put every
@@ -127,6 +146,55 @@ section) with the driving dimensions and the constrained features marked.
 Scale to fit the `viewBox` (`0 0 620 400` in the template). This is a
 sanity-check sketch, not a render -- its job is to make a gross error
 obvious (a boss off the plate, a wall on the wrong side).
+
+**Laying out more than one view -- give each a region BEFORE you scale
+anything into it.** The recurring failure isn't a wrong shape, it's two
+views (or a view and its own caption) drawn into the same pixel space
+because the scale factor for each was computed independently from its own
+content with no bound on where the result would land:
+
+```js
+// WRONG -- s1 and s2 are each "however big my content needs to be", with
+// nothing stopping the section (bz0=270, tall) from landing on top of the
+// top view (cy=80) the moment its own geometry happens to be large.
+const s1 = 280/(2*arcHalf), cy=80;
+const s2 = 150/thickness,   bz0=270;
+```
+
+```js
+// RIGHT -- carve the 620x400 canvas into disjoint regions FIRST (own a
+// rectangle each, caption included), then compute a scale that fits each
+// view'S OWN content inside its OWN region -- never the other way round.
+const topX0=24, topX1=596, topY0=46, topY1=150;      // region, not a guess
+const s1 = Math.min((topX1-topX0)/widthMm, (topY1-topY0)/heightMm);
+const tcx=(topX0+topX1)/2, tcy=(topY0+topY1)/2;       // centre OF the region
+const T=(x,y)=>[tcx+x*s1, tcy-y*s1];
+```
+
+Then: **captions and labels get a fixed slot, never a position computed from
+a shape's own scaled geometry.** `cap()` for a view goes a fixed distance
+above that view's own `Y0`; a note between two views goes at a fixed Y in the
+gap you left for it; a label for a small feature (a bore, a corner) goes
+*outside* the region in its own column, joined by `ln()` as a leader line,
+rather than guessed to land in empty space inside the shape -- shapes grow
+under slider changes, empty space today is not empty space at another value.
+Multi-view layouts in this file (`bottom-cover`'s top/section/unrolled,
+`tof-wedge`'s top/section) both follow this: fixed region bounds, fixed
+caption offsets, a leader line for anything labelled off to the side.
+
+**How to know a layout is actually right: run the checker, don't eyeball
+it.** `check_bench.py` (below) parses every `draw()` output's `<rect>`,
+`<circle>`, `<polygon>`, `<path>` and `<text>` into approximate bounding
+boxes and flags two things: a text box more than ~35% covered by a filled
+shape (unreadable), and two part-coloured solid shapes overlapping more than
+~30% of the smaller one's area (the two-views-sharing-one-region bug, minus
+false positives from a legitimate hole-in-a-boss, which is void-fill against
+part-fill and so never triggers it). It runs at defaults AND at every
+slider's min/max, because a layout that's fine at the default value can
+still collide once a slider pushes one view's content larger. A clean run is
+necessary, not sufficient -- still glance at the rendered page once before
+publishing -- but it catches the actual recurring bug class without a human
+staring at every slider extreme.
 
 ## 4. SVG helper vocabulary
 
