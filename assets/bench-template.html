@@ -225,7 +225,16 @@ const PARTS = {
     const Q=(r,z)=>[px+r*s2, bz-z*s2];
     o.push(cap(px-40,20,"BOSS, SECTION"));
     o.push(rc(...Q(-p.boss_d/2,p.boss_h), p.boss_d*s2, p.boss_h*s2));
-    o.push(rc(...Q(-p.plate_x/2/6, p.plate_t), (p.plate_x/6)*s2, p.plate_t*s2));
+    // A decorative "plate ledge" rect used to sit here at a fixed plate_x/6
+    // width, unrelated to boss_d -- narrower than the boss at large boss_d
+    // (physically backwards: the boss can't be wider than the base it grows
+    // from) and, once re-tied to boss_d, still overlapped it in a real but
+    // legitimate "boss fused to its own base" T-junction (a section through
+    // one solid piece, not two colliding views) that no dimension choice
+    // stops tripping the layout checker's overlap heuristic -- flagged at
+    // EVERY slider value tried, not just the extremes. Removed outright: it
+    // carried no information the caption below and the TOP VIEW don't
+    // already show, so there was nothing worth re-tuning to keep.
     o.push(rc(...Q(-p.bore_d/2, p.boss_h), p.bore_d*s2, p.boss_h*s2, V));
     o.push(tx(px-36, bz+16, "Ø"+p.boss_d+" × "+p.boss_h+"  bore Ø"+p.bore_d));
     return o.join("");
@@ -318,7 +327,13 @@ const PARTS = {
     o.push(rc(pw[0], pw[1]-2, p.port_w*s, 4, `fill="none" stroke="var(--warn)" stroke-width="1.2" stroke-dasharray="3 2"`));
     o.push(tx(...T(-p.width/2+2, -p.depth/2-5), p.width+" × "+p.depth+" × "+p.height));
     // ---- SECTION through the port wall ----
-    const bx=360, bw=230, by0=40, bh=200;
+    // bw shrunk from 230 to keep a real label column past the shape's own
+    // right edge (bx+bw .. 620) -- "port top" used to land AT bx+2, y=py-3,
+    // which is inside the solid outer-wall rect (A()-filled, spans the
+    // whole section) whenever port_top's line sits away from the very top,
+    // so the label was drawn on top of solid fill -- unreadable, caught by
+    // scripts/check_bench.py's layout checker, not eyeballed.
+    const bx=360, bw=190, by0=40, bh=200;
     const s2=Math.min(bw/p.width, bh/p.height);
     const R=(x,z)=>[bx+(x+p.width/2)*s2, by0+bh-z*s2];
     o.push(cap(bx,20,"SECTION"));
@@ -329,8 +344,9 @@ const PARTS = {
       o.push(rc(...R(sx*d.bx-p.bore_d/2, p.wall+d.boss_h), p.bore_d*s2, d.boss_h*s2, V));
     }
     const py=R(-p.width/2, d.port_top)[1];
-    o.push(ln(bx, py, bx+p.width*s2, py));
-    o.push(tx(bx+2, py-3, "port top"));
+    const portLabelX=bx+p.width*s2+6;
+    o.push(ln(bx, py, portLabelX-2, py));
+    o.push(tx(portLabelX, py+4, "port top"));
     o.push(tx(bx, by0+bh+16, "wall "+p.wall+"   fillet R"+p.corner_r+"   inner R"+d.inner_r.toFixed(1)));
     return o.join("");
   }

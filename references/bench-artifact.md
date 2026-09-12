@@ -186,15 +186,41 @@ caption offsets, a leader line for anything labelled off to the side.
 it.** `check_bench.py` (below) parses every `draw()` output's `<rect>`,
 `<circle>`, `<polygon>`, `<path>` and `<text>` into approximate bounding
 boxes and flags two things: a text box more than ~35% covered by a filled
-shape (unreadable), and two part-coloured solid shapes overlapping more than
-~30% of the smaller one's area (the two-views-sharing-one-region bug, minus
-false positives from a legitimate hole-in-a-boss, which is void-fill against
-part-fill and so never triggers it). It runs at defaults AND at every
-slider's min/max, because a layout that's fine at the default value can
-still collide once a slider pushes one view's content larger. A clean run is
-necessary, not sufficient -- still glance at the rendered page once before
-publishing -- but it catches the actual recurring bug class without a human
-staring at every slider extreme.
+shape (unreadable), and two part-coloured solid shapes overlapping between
+~30% and ~95% of the smaller one's area (the two-views-sharing-one-region
+bug). It runs at defaults AND at every slider's min/max, because a layout
+that's fine at the default value can still collide once a slider pushes one
+view's content larger. A clean run is necessary, not sufficient -- still
+glance at the rendered page once before publishing -- but it catches the
+actual recurring bug class without a human staring at every slider extreme.
+
+**Two false-positive shapes the solid-overlap check deliberately does NOT
+flag, both found the hard way:**
+
+- **A hole in a boss.** The hole is void-fill against the boss's part-fill,
+  so it never matches the part-vs-part filter at all.
+- **Full containment (>95%).** A boss standing on a wall or plate, drawn
+  solid-on-solid to show it rising from a solid section, has the smaller
+  shape's bbox entirely inside the larger one's -- geometrically distinct
+  from a real view collision, where each shape has some area the *other*
+  doesn't. Above 95% is treated as intentional nesting, not a bug.
+
+**What the checker still WILL flag, correctly, and what to do about it: a
+"boss fused to its own base" T-junction.** Two rects representing one
+continuous solid -- a tall boss rect and a short, wide base/ledge rect it
+grows out of -- cross like a `+`, each sticking out where the other doesn't,
+which is a **real partial overlap** (30-95%), not full containment, and the
+checker has no way to tell it apart from an actual collision by geometry
+alone. This isn't a false positive to suppress -- it's a genuine limit of
+this heuristic. Chasing it by resizing the ledge just relocates which axis
+overlaps (verified: tying a boss-plate model's ledge width to `boss_d`
+stopped the X-axis overlap and immediately produced a Y-axis one instead,
+flagged at *every* slider value tried, not just the extremes -- the pattern
+is inherent to two rects sharing an edge, not a tunable dimension). If the
+secondary shape is decorative -- doesn't carry a dimension the caption or
+another view doesn't already show -- the fix that actually works is to
+**remove it**, not keep re-tuning a size that will always cross the other
+shape somewhere.
 
 ## 4. SVG helper vocabulary
 

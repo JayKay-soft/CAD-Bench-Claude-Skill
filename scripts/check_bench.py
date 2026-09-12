@@ -124,14 +124,28 @@ function checkLayout(svg) {
   // Two SOLID ("part"-fill) shapes heavily overlapping is the two-views-
   // drawn-in-the-same-region bug. A hole in a boss is NOT this: holes are
   // void-fill, so restricting to part-vs-part avoids flagging that.
+  //
+  // FULL CONTAINMENT IS A SEPARATE, LEGITIMATE PATTERN, not this bug --
+  // found the hard way: a boss drawn solid-on-solid standing on a section's
+  // own solid wall (both part-fill, by design, to show it standing proud)
+  // sits at ~100% overlap of its own (smaller) area, same as tof_wedge's
+  // real two-views-collided bug once was at 63%. The two are NOT the same
+  // shape of defect: a real view collision leaves each shape SOME area
+  // outside the other (neither fully contains the other); a boss standing
+  // on a wall has the smaller shape's bbox ENTIRELY inside the larger's.
+  // Distinguish by containment, not just overlap fraction -- flag the
+  // partial-overlap band (a real collision) and skip near-full containment
+  // (a legitimate nested feature).
   const solids = shapes.filter(s => /var\(--part\)/.test(s.fill || ''));
   for (let i = 0; i < solids.length; i++)
     for (let j = i + 1; j < solids.length; j++) {
-      const smaller = Math.min(bboxArea(solids[i]), bboxArea(solids[j]));
+      const a = solids[i], b = solids[j];
+      const smaller = Math.min(bboxArea(a), bboxArea(b));
       if (smaller <= 0) continue;
-      const ov = bboxIntersect(solids[i], solids[j]);
-      if (ov > 0.3 * smaller)
-        problems.push('two solid shapes overlap ' + Math.round(100 * ov / smaller)
+      const ov = bboxIntersect(a, b);
+      const frac = ov / smaller;
+      if (frac > 0.3 && frac <= 0.95)
+        problems.push('two solid shapes overlap ' + Math.round(100 * frac)
           + '% of the smaller one -- looks like two views sharing one region');
     }
   return problems;
