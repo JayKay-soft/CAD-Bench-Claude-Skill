@@ -221,7 +221,17 @@ const PARTS = {
     }
     o.push(tx(...T(-p.plate_x/2+2, -p.plate_y/2-4), p.plate_x+" × "+p.plate_y));
     // ---- SECTION THROUGH ONE BOSS ----
-    const px=400, s2=Math.min(150/p.boss_d, 150/p.boss_h), bz=300;
+    // px pushed from 400 to 460: TOP VIEW's right edge is fixed at x=360
+    // (30 + the 330 px width budget above, whichever axis s1 is limited
+    // by), but the boss rect's own half-width can reach a constant 75 px
+    // at its own worst case (s2=150/boss_d exactly cancels boss_d out) --
+    // so the old px=400 let the section's left edge reach x=325, INSIDE
+    // the top view's region, for a real (if small, ~13% of the smaller
+    // shape's area at defaults -- under the checker's 30% flag threshold,
+    // but visibly overlapping in a screenshot, which is how this was
+    // actually found). 460-75=385 clears 360 with a real 25 px gap at the
+    // worst case, not just at default slider values.
+    const px=460, s2=Math.min(150/p.boss_d, 150/p.boss_h), bz=300;
     const Q=(r,z)=>[px+r*s2, bz-z*s2];
     o.push(cap(px-40,20,"BOSS, SECTION"));
     o.push(rc(...Q(-p.boss_d/2,p.boss_h), p.boss_d*s2, p.boss_h*s2));
