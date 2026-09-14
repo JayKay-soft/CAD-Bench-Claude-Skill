@@ -56,6 +56,35 @@ See **[HOWTO.md](./HOWTO.md)** for the end-user side of the workflow above —
 what you actually see and do at each step, walked through with one of the
 skill's own worked examples (`models/boss_plate.py`) and its real output.
 
+## Reverse-engineering an existing STL
+
+Sometimes the part already exists as a loose, source-less STL and the job
+is to turn *that* into a parametric model, not design something new —
+different failure mode, different method:
+
+```
+python scripts/inspect_stl.py part.stl            # every distinct Z the mesh
+                                                    # actually has vertices at —
+                                                    # never guess sample heights
+python scripts/inspect_stl.py part.stl --z 0.2     # detail one height, split
+                                                    # into radius bands so two
+                                                    # loops sharing one Z don't
+                                                    # get read as one shape
+```
+
+Gate the reconstruction against the **original mesh's own volume**, not
+just the rebuild's internal tessellation consistency — and if a feature
+mates to something real outside the file (a motor shaft, a bearing, a
+fastener), check that part's own spec before trusting a literal mesh
+reading; a precisely-measured modelling mistake is still a mistake. Full
+method in `references/stl-reverse-engineering.md`.
+
+Dimensions that come from that kind of external requirement, rather than
+free design choice, can be marked `locked:true` on a bench slider — it
+renders disabled and dimmed with a 🔒 and the source noted in a tooltip,
+so nobody drags a datasheet dimension off-spec while tuning the sliders
+next to it. See `references/bench-artifact.md`.
+
 ## Install
 
 **Option A — one file.** Download [`cad-bench.skill`](./cad-bench.skill) from
@@ -77,17 +106,22 @@ standoffs, ducts, jigs. You don't need to name the skill for it to trigger.
 ```
 cad-bench/
 ├── SKILL.md                    the workflow Claude follows
+├── HOWTO.md                    the end-user walkthrough, with real screenshots
 ├── scripts/
 │   ├── brep.py                 build123d wrapper: selectors, safe fillet/chamfer,
 │   │                           the Windows-font-crash workaround, export + gate
 │   ├── verify.py               the watertight/volume/bbox gate, shared by every export
 │   ├── check_bench.py          headless validator for a CAD Bench slider page
-│   └── new_part.py             scaffolds a new model + matching bench recipe
+│   ├── new_part.py             scaffolds a new model + matching bench recipe
+│   └── inspect_stl.py          first look at an existing STL before reverse-
+│                                engineering it: every distinct Z, radius bands
 ├── references/
 │   ├── brep.md                 operation-by-operation lookup: fillet, chamfer,
 │   │                           shell, loft, selectors, the failure modes of each
-│   ├── bench-artifact.md       the slider-recipe format and the Claude hand-off wiring
-│   └── verification.md         why each gate exists, how to prove a selection is right
+│   ├── bench-artifact.md       the slider-recipe format, locked sliders, the
+│   │                           Claude hand-off wiring
+│   ├── verification.md         why each gate exists, how to prove a selection is right
+│   └── stl-reverse-engineering.md  method for turning a loose STL into a model
 ├── models/                     three worked, runnable examples
 │   ├── boss_plate.py             — plain prismatic: plate, bosses, bores
 │   ├── enclosure.py              — fillet → shell → chamfer, internal bosses, a port
