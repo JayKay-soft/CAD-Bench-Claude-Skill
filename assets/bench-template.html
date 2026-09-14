@@ -175,7 +175,8 @@ const PARTS = {
     {id:"inset",fs:"INSET",u:"MM",g:"Plate",label:"Hole inset from edges",min:3,max:20,step:.5,val:8},
     {id:"boss_d",fs:"BOSS_D",u:"MM",g:"Boss",label:"Diameter",min:5,max:24,step:.5,val:10},
     {id:"boss_h",fs:"BOSS_H",u:"MM",g:"Boss",label:"Height",min:4,max:40,step:1,val:12},
-    {id:"bore_d",fs:"BORE_D",u:"MM",g:"Boss",label:"Bore diameter",min:2,max:10,step:.1,val:4}
+    {id:"bore_d",fs:"BORE_D",u:"MM",g:"Boss",label:"Bore diameter",min:2,max:10,step:.1,val:4,
+      locked:true,lockNote:"Fixed by the M4 heat-set insert this boss is sized for -- not a free design choice"}
   ],
   derive(p){
     return {

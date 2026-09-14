@@ -6,6 +6,14 @@ just shows what to expect at each step. Every screenshot below is a real
 capture of the skill's own worked example (`models/boss_plate.py`) running
 in a browser, not a mockup.
 
+**Jump to:** [ask for a part](#1-ask-for-a-part) ·
+[the model](#2-claude-writes-a-parametric-model-not-a-one-off-shape) ·
+[the bench page](#3-claude-publishes-a-cad-bench-page--this-is-what-you-see) ·
+[the checks](#4-a-row-of-checks-not-a-generic-linter) ·
+[handing values back](#5-hand-the-values-back-to-claude) ·
+[locked sliders](#6-some-sliders-are-locked-on-purpose) ·
+[what it won't do](#what-it-wont-do)
+
 ## 1. Ask for a part
 
 You don't need to name the skill or mention CAD tools. Any of these trigger it:
@@ -17,6 +25,14 @@ You don't need to name the skill or mention CAD tools. Any of these trigger it:
 > survives a drop"
 
 > "tweak the enclosure — thinner wall, still passes the checks"
+
+There's a second starting point too: **"here's an STL someone printed, no
+source file — make it a parametric part I can tune."** Claude reads the
+mesh's own geometry (never by eyeballing a screenshot of it) with
+`scripts/inspect_stl.py`, cross-checks anything that mates to a real
+component (a motor shaft, a bearing) against that component's own spec, and
+builds a proper model from what it finds — see §6 below for what that looks
+like on the resulting bench page.
 
 ## 2. Claude writes a parametric model, not a one-off shape
 
@@ -84,6 +100,31 @@ re-runs the model — same gate, same one-line-on-success report, now with
 your numbers instead of the defaults. You get the new STL and a note on
 which check had the least margin, since that's where the next change is
 most likely to break something.
+
+## 6. Some sliders are locked, on purpose
+
+Not every dimension is a free choice. If a value has to match something
+real outside the model — a motor's shaft diameter, a bearing bore, a
+fastener standard — dragging it around while tuning everything else is how
+a part quietly stops fitting the thing it mates to. Those sliders render
+**locked**: dimmed, disabled, a 🔒 next to the label, showing exactly the
+number the requirement demands.
+
+![Bore diameter slider dimmed and disabled, a lock icon next to its label, still showing 4 mm](docs/screenshots/05-locked-slider.png)
+
+(This one's real too: `bore_d` on the boss plate above is fixed to the M4
+insert the boss is sized for. Every *other* slider on the page stays free —
+locking is for requirements, not for "the default I happened to pick.")
+
+Hover the lock icon for why it's fixed. If the real part on your bench
+turns out to measure differently than the spec says, click the 🔒 — it
+flips to 🔓 and the slider unlocks for that session, same as any other.
+
+This is also what a part reverse-engineered from an existing STL (§1) tends
+to produce: `python scripts/inspect_stl.py part.stl` finds the geometry,
+but a dimension that mates to a real component gets locked to that
+component's own spec rather than to whatever the loose STL happened to
+measure — full method in `references/stl-reverse-engineering.md`.
 
 ## What it won't do
 
