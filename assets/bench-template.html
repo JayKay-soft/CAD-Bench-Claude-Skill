@@ -45,7 +45,12 @@
           border-bottom:1px solid var(--rule-soft)}
   .row{display:grid;grid-template-columns:1fr 92px 76px;gap:10px;
        align-items:center;padding:5px 0}
-  .row label{font-size:13px}
+  .row label{font-size:13px;display:flex;align-items:center;gap:5px}
+  .row.locked{opacity:.72}
+  .row.locked input[type=range]{accent-color:var(--ink-2)}
+  .lockbtn{border:0;background:none;padding:0;margin:0;font-size:12px;line-height:1;
+           cursor:pointer;color:var(--ink-2)}
+  .lockbtn:hover{color:var(--ink)}
   .numbox{width:100%;font:inherit;font-family:"IBM Plex Mono",ui-monospace,monospace;
           font-size:13px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);
           background:var(--paper);border:1px solid var(--rule);border-radius:4px;
@@ -378,23 +383,61 @@ function buildPicker(){
   }));
 }
 
+// ---- Lockable sliders (params with `locked:true` -- a value fixed by an
+// external requirement, e.g. a datasheet dimension or fastener standard,
+// not just a free starting point) --------------------------------------
+// Default state (nothing in storage yet) is WHATEVER the param declares
+// via `locked`; storage only ever records a value once the user actually
+// clicks the toggle, so a param's own default can change later without a
+// stale "unlocked" entry silently overriding it forever.
+function isLocked(q){
+  if(q.locked===undefined) return false;
+  try{
+    const all=JSON.parse(localStorage.getItem("cadbenchLocks")||"{}");
+    const v=(all[KEY]||{})[q.id];
+    return v===undefined ? !!q.locked : !!v;
+  }catch(e){ return !!q.locked; }
+}
+function setLocked(id, val){
+  try{
+    const all=JSON.parse(localStorage.getItem("cadbenchLocks")||"{}");
+    all[KEY]=all[KEY]||{}; all[KEY][id]=val;
+    localStorage.setItem("cadbenchLocks", JSON.stringify(all));
+  }catch(e){}
+}
+
 function buildControls(){
   const groups=[];
   P().params.forEach(q=>{ if(!groups.includes(q.g)) groups.push(q.g); });
   el("controls").innerHTML = groups.map(g=>
     `<div class="group"><div class="glabel">${g}</div>` +
     P().params.filter(q=>q.g===g).map(q=>{
+      const locked=isLocked(q);
       let saved=null; try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}")[KEY]||{})[q.id]; }catch(e){}
-      const v = saved!==undefined && saved!==null ? saved : q.val;
-      return `<div class="row"><label for="${q.id}">${q.label}</label>`+
-        `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}">`+
-        `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"></div>`;
+      // Locked always shows the requirement's own value, ignoring any
+      // stale saved override from a previous unlocked session -- the
+      // point of locking is that this number is not a free choice.
+      const v = locked ? q.val : (saved!==undefined && saved!==null ? saved : q.val);
+      const lockBtn = q.locked===undefined ? "" :
+        ` <button type="button" class="lockbtn" data-lockid="${q.id}" `+
+        `title="${(locked?"Locked to a requirement — click to override: ":"Click to re-lock: ")
+          +(q.lockNote||"fixed value")}">${locked?"\u{1F512}":"\u{1F513}"}</button>`;
+      return `<div class="row${locked?" locked":""}"><label for="${q.id}">${q.label}${lockBtn}</label>`+
+        `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}"${locked?" disabled":""}>`+
+        `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"${locked?" disabled":""}></div>`;
     }).join("") + `</div>`).join("");
   P().params.forEach(q=>{
     el(q.id).addEventListener("input", render);
     const box=el("o_"+q.id);
     box.addEventListener("change", ()=>commitNumbox(q));
     box.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); box.blur(); } });
+  });
+  el("controls").querySelectorAll(".lockbtn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id=btn.dataset.lockid;
+      setLocked(id, !isLocked(P().params.find(q=>q.id===id)));
+      buildControls(); render();
+    });
   });
   el("note").textContent = P().note;
 }
@@ -426,7 +469,7 @@ function render(){
   part.params.forEach(q=>{
     const box=el("o_"+q.id);
     if(document.activeElement!==box)   // don't fight the user mid-type
-      box.value = fmt(p[q.id], stepDecimals(q.step)) + (q.u==="DEG"?"°":" mm");
+      box.value = fmt(p[q.id], stepDecimals(q.step)) + (q.u==="DEG"?"°":(q.u?" mm":""));
   });
   el("dwg").innerHTML = part.draw(p,d);
   el("derived").innerHTML = part.cards(d).map(([k,x])=>
@@ -442,7 +485,8 @@ function render(){
       `<em>${note}</em></div>`;
   }).join("");
   el("consts").textContent = part.params.filter(q=>q.fs)
-    .map(q=>`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])} * ${q.u};`).join("\n")
+    .map(q=>q.u?`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])} * ${q.u};`
+              :`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])};`).join("\n")
     + `\n// ${part.file}`;
   try{ const all=JSON.parse(localStorage.getItem("cadbench")||"{}");
        all[KEY]=p; localStorage.setItem("cadbench", JSON.stringify(all)); }catch(e){}

@@ -45,6 +45,20 @@ insert", "inner corner radius = corner_r − wall, must stay positive". These
 become `wall_check()` calls in the model and check rows on the bench, and
 they are the point: a bounding box cannot see any of them.
 
+**Reverse-engineering an existing, source-less STL instead of designing
+something new?** Different failure mode, different method — go to
+`references/stl-reverse-engineering.md` before sampling a single point by
+hand. Short version: `python scripts/inspect_stl.py part.stl` lists every
+distinct Z the mesh actually has vertices at (never guess sample heights —
+a guessed list can straddle every feature boundary and miss them all), and
+`--z <value>` separates a confusing multi-loop face into radius bands before
+you try to read a shape off it. Gate the reconstruction against the
+**original mesh's own volume**, not just its own tessellation's
+self-consistency. And if a feature mates to something real outside the file
+(a motor shaft, a bearing, a fastener), check that part's own spec before
+trusting a literal reading — the STL can precisely measure someone else's
+modelling mistake.
+
 ### 2. Scaffold, don't hand-write
 
 ```

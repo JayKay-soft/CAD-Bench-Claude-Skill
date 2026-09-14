@@ -65,9 +65,31 @@ On every later republish to the same URL, **omit `favicon`** and keep the
 ```
 
 `g` groups sliders under a heading. `u` is `"MM"` or `"DEG"` and controls the
-unit shown and the `* MM` / `* DEG` suffix in the consts pane. `step` sets the
+unit shown and the `* MM` / `* DEG` suffix in the consts pane; use `u:""`
+for a bare count (a lobe count, a hole count) -- no unit suffix in the
+numbox, no `* unit` in the emitted `const`, just the number. `step` sets the
 slider granularity -- match it to what you can actually hold in a print
 (0.1 mm for fits, 1 mm for gross size, 0.5-1° for angles).
+
+**A param can be `locked` -- fixed to an external requirement, not a free
+starting point.** Add `locked:true` and a `lockNote` explaining the source:
+
+```js
+{id:"hole_d", fs:"HOLE_D", u:"MM", g:"Hole", label:"Diameter",
+  min:3, max:7.5, step:.1, val:6.2,
+  locked:true, lockNote:"JGB37-520 datasheet Ø6.0 mm shaft + 0.1 mm radial clearance"},
+```
+
+A locked slider renders disabled and dimmed with a 🔒 next to its label
+(tooltip = `lockNote`); clicking the lock toggles it to 🔓 and enables free
+editing until clicked again. Locked always shows the param's own `val`,
+ignoring any previously-saved override, because the point of locking is
+that this number is not supposed to drift. Use it for anything sourced from
+a datasheet, a measured mating part, or a fastener standard -- a value the
+model needs to match something real, not a value the user is meant to be
+dialing. See `references/stl-reverse-engineering.md` §5 for the case this
+was built for. Leave `locked` off entirely for ordinary design choices
+(chamfer size, clearance margin, lobe count) -- those stay free sliders.
 
 **The value box beside each slider is a typed-entry field, not a read-out.**
 A slider alone can't always land on the exact number a reviewer wants, so the
