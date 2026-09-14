@@ -45,6 +45,20 @@ insert", "inner corner radius = corner_r − wall, must stay positive". These
 become `wall_check()` calls in the model and check rows on the bench, and
 they are the point: a bounding box cannot see any of them.
 
+**Reverse-engineering an existing, source-less STL instead of designing
+something new?** Different failure mode, different method — go to
+`references/stl-reverse-engineering.md` before sampling a single point by
+hand. Short version: `python scripts/inspect_stl.py part.stl` lists every
+distinct Z the mesh actually has vertices at (never guess sample heights —
+a guessed list can straddle every feature boundary and miss them all), and
+`--z <value>` separates a confusing multi-loop face into radius bands before
+you try to read a shape off it. Gate the reconstruction against the
+**original mesh's own volume**, not just its own tessellation's
+self-consistency. And if a feature mates to something real outside the file
+(a motor shaft, a bearing, a fastener), check that part's own spec before
+trusting a literal reading — the STL can precisely measure someone else's
+modelling mistake.
+
 ### 2. Scaffold, don't hand-write
 
 ```
@@ -124,6 +138,18 @@ edge set, prove it hit the right edges by differential volume: build with the
 feature at zero, subtract, compare against what it should remove. Recipe in
 `references/verification.md`.
 
+**Watertight + correct volume is not proof there are no slivers.** A boolean
+can pass every gate above while still carrying degenerate (near-zero-area)
+triangles underneath them — measured on a real part, more than once, before
+this was checked directly instead of inferred from a watertight/volume pass
+or from how a tessellation *looked*. Check face area and edge-manifold count
+directly; when a fix needs a tuned offset (a shave, an overlap), sweep a real
+range on every variant the model ships rather than picking one cautious
+number; and when adding a feature to an existing solid, prefer baking it into
+the host's own profile over booleaning two independent tessellations
+together. Full method, with the real numbers from where this went wrong
+twice, in `references/verification.md`.
+
 ### 5. Bench page
 
 One shared CAD Bench artifact, a multi-part picker. First use: publish
@@ -138,14 +164,34 @@ python scripts/check_bench.py <bench.html>
 ```
 
 It runs every recipe headlessly at defaults and at every slider extreme, and
-fails on the one bug this format has: reading `d.plate_x` when `plate_x` is a
-slider gives `undefined`, `undefined >= 2` is an ordinary `false`, and the row
-goes **red like a real constraint failure** — so you tune sliders chasing a
-typo. Sliders are on `p`, computed values on `d`. Field spec and SVG helpers
-are in `references/bench-artifact.md`.
+fails on two classes of bug this format has. One: reading `d.plate_x` when
+`plate_x` is a slider gives `undefined`, `undefined >= 2` is an ordinary
+`false`, and the row goes **red like a real constraint failure** — so you
+tune sliders chasing a typo. Sliders are on `p`, computed values on `d`. Two:
+a `draw()` whose views were scaled to fit their own content with no bound on
+where the result lands, so a caption or a whole second view ends up drawn on
+top of another shape — unreadable, but nothing throws. The checker parses
+the SVG for text mostly covered by a filled shape, and solid shapes heavily
+overlapping each other, at every slider extreme, not just defaults. Field
+spec, the SVG helpers, and how to lay out more than one view without this
+happening are in `references/bench-artifact.md`.
 
 Then hand the user the link: adjust sliders, and when the checks are green
 press **"Hand these to Claude"**.
+
+**"Always" includes republishing an existing part, not just a first-time
+recipe.** The bench recipe and the model are two independent
+implementations of one design — nothing keeps a fix made in `build()`/
+`derive()` from silently going stale in the recipe's `derive()`/`checks()`
+except this lint. Concretely: fixing a constraint in the model (say, which
+variables a feature is anchored to) and forgetting to mirror the same
+change into the recipe leaves the bench describing a part that no longer
+matches what the model builds — nothing errors, the old recipe just keeps
+reporting green on the wrong geometry. Re-run `check_bench.py` on *every*
+republish, including "just a small model fix," and re-check whether the
+recipe's own default `val`s still pass any check you just added — a check
+added in response to a newly-found bug can fail the shipped defaults, which
+means the bug was live in the stock preset the whole time.
 
 ### 6. Read back, regenerate, deliver
 
@@ -161,3 +207,36 @@ least margin; that is where the next change will break something.
 
 Each hand-off overwrites `bench/<part>`. If you add a dimension to the model,
 add the slider in the same change or the round-trip silently drops it.
+
+## Token economy
+
+Keep the gates that are cheap and catch real bugs; cut verification that
+only *feels* thorough.
+
+**Keep:**
+- `wall_check()` / `export_verified()` in the model — one line on success by
+  design (see §4), so running it often costs almost nothing.
+- `check_bench.py` before every publish — one Bash call, sweeps defaults and
+  every slider extreme, and is the only thing that catches model/recipe
+  logic drift (see above) or a newly-broken default.
+- Running the same numbers through both the model and a standalone
+  re-derivation once, for a change that touches logic shared between the
+  two — see below.
+
+**Cut:**
+- Don't drive the bench artifact's own sliders in a separate Browser-pane
+  session to "verify" a JS-only logic edit. A published artifact viewed in
+  a fresh tab is not guaranteed to be the same live session the user is
+  looking at — clicking sliders there can burn several tool calls (numbox
+  commit-on-blur timing, cross-origin iframes defeating `find`/`read_page`)
+  while verifying nothing the user will actually see. If you need to prove
+  a JS `derive()`/`checks()` edit is correct, extract the function and run
+  it under `node` against the real params instead — deterministic, one
+  call, no UI flakiness.
+- Don't `read_db` speculatively "just to check" for a handoff. Read it once
+  when the user actually signals one ("handed over", "hand to db", a
+  "Hand these to Claude" click reflected back in conversation, or a live
+  watch notification) and act on what comes back — don't re-poll.
+- Don't re-export with a tighter tolerance or add extra prints to "see the
+  numbers" on a passing run (see §4) — that habit compounds across a
+  session for no benefit.

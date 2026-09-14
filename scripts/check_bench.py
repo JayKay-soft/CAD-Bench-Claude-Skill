@@ -39,6 +39,118 @@ global.localStorage = {getItem(){return '{}';}, setItem(){}};
 global.window = {};
 global.navigator = {};
 
+// ---- SVG layout check --------------------------------------------------
+// Recipe bugs of THIS class render fine and throw nothing: a caption text
+// placed at a fixed (x,y) that a later-computed shape grows over, or two
+// views whose regions were never given disjoint pixel bounds, so one is
+// drawn straight on top of the other. Approximate bounding boxes (real
+// text metrics need a real layout engine, which this harness deliberately
+// has none of -- it stays a fast headless check) are precise enough to
+// catch "mostly covered", which is the failure mode that actually makes a
+// drawing unreadable.
+function parseAttrs(str) {
+  const o = {}; const re = /([\w:-]+)\s*=\s*"([^"]*)"/g; let m;
+  while ((m = re.exec(str))) o[m[1]] = m[2];
+  return o;
+}
+function bboxOf(tag, attrsStr, inner) {
+  const a = parseAttrs(attrsStr);
+  if (tag === 'rect') {
+    const x = +a.x, y = +a.y, w = +a.width, h = +a.height;
+    if ([x, y, w, h].some(Number.isNaN)) return null;
+    return {x0: x, y0: y, x1: x + w, y1: y + h, fill: a.fill};
+  }
+  if (tag === 'circle') {
+    const cx = +a.cx, cy = +a.cy, r = +a.r;
+    if ([cx, cy, r].some(Number.isNaN)) return null;
+    return {x0: cx - r, y0: cy - r, x1: cx + r, y1: cy + r, fill: a.fill};
+  }
+  if (tag === 'polygon') {
+    const pts = (a.points || '').trim().split(/\s+/).filter(Boolean)
+      .map(p => p.split(',').map(Number));
+    if (!pts.length) return null;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    return {x0: Math.min(...xs), y0: Math.min(...ys),
+            x1: Math.max(...xs), y1: Math.max(...ys), fill: a.fill};
+  }
+  if (tag === 'path') {
+    // Every point-bearing path in this format is built from the shared
+    // S(x,y) -> "x,y" helper, comma-joined -- unlike the space-separated
+    // radius/rotation/flag numbers an arc command also carries. Matching
+    // only comma-joined pairs pulls out exactly the path's real points.
+    const pairs = [...(a.d || '').matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)]
+      .map(mm => [+mm[1], +mm[2]]);
+    if (!pairs.length) return null;
+    const xs = pairs.map(p => p[0]), ys = pairs.map(p => p[1]);
+    return {x0: Math.min(...xs), y0: Math.min(...ys),
+            x1: Math.max(...xs), y1: Math.max(...ys), fill: a.fill};
+  }
+  if (tag === 'text') {
+    const x = +a.x, y = +a.y, fs = +(a['font-size'] || 11);
+    if ([x, y].some(Number.isNaN)) return null;
+    const charW = fs * 0.56;   // rough average glyph width, IBM Plex Sans
+    const w = (inner || '').length * charW;
+    return {x0: x, y0: y - fs * 0.82, x1: x + w, y1: y + fs * 0.28, text: inner};
+  }
+  return null;
+}
+function bboxArea(b) { return Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0); }
+function bboxIntersect(a, b) {
+  const iw = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const ih = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  return (iw <= 0 || ih <= 0) ? 0 : iw * ih;
+}
+function checkLayout(svg) {
+  const problems = [];
+  const els = [];
+  const re = /<(rect|circle|polygon|path|text)\s+([^>]*?)(?:\/>|>([^<]*)<\/text>)/g;
+  let m;
+  while ((m = re.exec(svg))) {
+    const b = bboxOf(m[1], m[2], m[3]);
+    if (b) els.push(Object.assign({tag: m[1]}, b));
+  }
+  const texts = els.filter(e => e.tag === 'text');
+  const shapes = els.filter(e => e.tag !== 'text' && e.fill && e.fill !== 'none');
+  for (const t of texts) {
+    const tArea = bboxArea(t);
+    if (tArea <= 0) continue;
+    for (const s of shapes) {
+      const ov = bboxIntersect(t, s);
+      if (ov > 0.35 * tArea)
+        problems.push('text "' + (t.text || '').slice(0, 28) + '" mostly covered by a <'
+          + s.tag + '> (' + Math.round(100 * ov / tArea) + '% overlap) -- unreadable');
+    }
+  }
+  // Two SOLID ("part"-fill) shapes heavily overlapping is the two-views-
+  // drawn-in-the-same-region bug. A hole in a boss is NOT this: holes are
+  // void-fill, so restricting to part-vs-part avoids flagging that.
+  //
+  // FULL CONTAINMENT IS A SEPARATE, LEGITIMATE PATTERN, not this bug --
+  // found the hard way: a boss drawn solid-on-solid standing on a section's
+  // own solid wall (both part-fill, by design, to show it standing proud)
+  // sits at ~100% overlap of its own (smaller) area, same as tof_wedge's
+  // real two-views-collided bug once was at 63%. The two are NOT the same
+  // shape of defect: a real view collision leaves each shape SOME area
+  // outside the other (neither fully contains the other); a boss standing
+  // on a wall has the smaller shape's bbox ENTIRELY inside the larger's.
+  // Distinguish by containment, not just overlap fraction -- flag the
+  // partial-overlap band (a real collision) and skip near-full containment
+  // (a legitimate nested feature).
+  const solids = shapes.filter(s => /var\(--part\)/.test(s.fill || ''));
+  for (let i = 0; i < solids.length; i++)
+    for (let j = i + 1; j < solids.length; j++) {
+      const a = solids[i], b = solids[j];
+      const smaller = Math.min(bboxArea(a), bboxArea(b));
+      if (smaller <= 0) continue;
+      const ov = bboxIntersect(a, b);
+      const frac = ov / smaller;
+      if (frac > 0.3 && frac <= 0.95)
+        problems.push('two solid shapes overlap ' + Math.round(100 * frac)
+          + '% of the smaller one -- looks like two views sharing one region');
+    }
+  return problems;
+}
+
 const out = {parts: [], fatal: null};
 try {
   const probe = `
@@ -110,6 +222,8 @@ try {
             if (String(svg).includes('NaN'))
               rec.problems.push(where + ': draw() emitted NaN into the SVG');
             if (where === 'defaults') rec.svg = String(svg).length;
+            for (const prob of checkLayout(String(svg)))
+              rec.problems.push(where + ': ' + prob);
           } catch (e) { rec.problems.push(where + ': draw threw ' + e.message); }
           reportMissing();
         };

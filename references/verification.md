@@ -105,6 +105,113 @@ edges and the rim chamfer removed 168 mm³ where 86 mm³ was intended, thinning
 a 2.4 mm wall from both sides. Nothing raised. The differential check caught
 it in one run.
 
+## Slivers: watertight and volume-correct is not enough
+
+`export_verified`'s gates (watertight, winding, volume, bbox) can all pass
+while the mesh still carries real degenerate triangles — a boolean can
+produce a technically valid, correct-volume solid that hides slivers down to
+1e-6 mm² at 1000:1+ edge-aspect-ratio underneath those gates. This happened
+twice on the same real part before it was checked directly instead of
+inferred.
+
+Check it directly, the same way every time:
+
+```python
+import trimesh, numpy as np
+m = trimesh.load(path)
+areas = m.area_faces
+groups = trimesh.grouping.group_rows(m.edges_sorted)
+counts = np.array([len(g) for g in groups])
+print("min_area:", areas.min(), "under_0.02:", int((areas < 0.02).sum()),
+      "non_manifold_edges:", int((counts != 2).sum()), "bodies:", m.body_count)
+```
+
+Every edge should be shared by **exactly 2 faces** (a real 2-manifold, no
+cracks); `bodies` should be 1; nothing should sit near-zero area relative to
+the part's own typical face size.
+
+**A suspicious-looking tessellation is a hypothesis, not a finding — check
+both, trust the number when they disagree.** A fan of triangles converging on
+one point, a webbed pattern, an oddly dense cluster: these are real signals
+worth investigating, but they are not proof by themselves. One revision of
+this skill's own development read a fan-of-triangles as a degenerate sliver
+and added an unneeded 0.75 mm shave to avoid it; measuring the actual face
+areas later showed that exact configuration had *zero* degenerate faces —
+the visual pattern was just how the kernel tessellates a shared edge, not a
+sign of a defect. Reading shape takes longer and is more ambiguous than
+reading a number; when they conflict, the number wins.
+
+**When a fix needs a real boolean between two independently-built shapes,
+verify with the SAME rigor before AND after — never re-use a verification
+result from a different geometry configuration.** A collapse/cleanup pass,
+an epsilon, a trim radius that was measured clean on one variant of a part
+is not evidence it stays clean on a different bearing angle, position, or
+sibling variant of the same part — re-run the same measurement on every
+configuration the model actually ships, not just the one open in front of you.
+
+## Tuning a fudge-factor parameter (shave / overlap / epsilon)
+
+Some fixes need a small deliberate offset — a shave to avoid a flush
+coincidence, a trim-radius overlap to avoid a knife-edge boolean, a tiny
+epsilon so two features don't share an exact boundary. Two rules, learned
+the slow way:
+
+1. **The safe range is often not monotonic — sweep it, don't guess a
+   cautious-feeling round number.** Both "too small" and "too big" can fail
+   while a value in between works; a bigger, safer-*feeling* value is not
+   automatically a safer *actual* one. Sweep a real range (`for v in
+   [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, ...]`), measure sliver count (see above)
+   at each, on **every** variant/configuration the model ships — and use the
+   smallest value that is *actually verified* clean everywhere, not the
+   first one that happened to work once. A part in this skill's own history
+   shipped with a shave 7x larger than the real measured minimum, cutting
+   far more material than the geometry required, because the first
+   safe-looking value was never re-challenged.
+2. **Give the swept value a distinctive, greppable name where it's
+   declared, with the sweep result in the comment right there** —
+   `PAD_SHAVE = 0.10  # swept 0.0-0.30 mm, only this passed both variants`,
+   not a bare literal buried inside a function body. The next person (you,
+   later) re-tuning this needs to find the constant and its prior sweep in
+   one grep, not re-derive from scratch which line the magic number lives on.
+3. **A value swept and verified on one kernel is not evidence for another.**
+   An exact BREP kernel (build123d/OCCT) and a mesh-CSG kernel (trimesh/
+   manifold3d) fail at completely different points for the "same" fix — a
+   flush (zero-gap) join was perfectly clean on the exact kernel but needed
+   a real, separately-swept minimum on the mesh kernel for the same
+   geometric idea. Re-sweep per kernel; don't port a number across them.
+
+## Add a feature by integrating it, not assembling it
+
+The instinct when adding a hole, boss, or bore to an existing solid is to
+build the new feature as an independent primitive and boolean it against
+the host afterward (extrude a plain box, then subtract a cylinder for its
+hole). That boolean is exactly where slivers come from: two independently
+tessellated meshes being forced to agree along whatever curve their
+intersection produces.
+
+Prefer building the feature directly into the host's own construction
+instead, when the feature's geometry allows it:
+
+```python
+# WRONG-shaped instinct -- two independent tessellations reconciled after
+# the fact by a 3D boolean, prone to earcut/mesh-boolean slivers regardless
+# of position (verified: this failed at ~9 of 12 arbitrary positions tested).
+box = _aabb(...)
+hole = _z_cyl(radius, z0, z1)
+box_with_hole = _diff(box, hole)
+
+# RIGHT-shaped instinct -- the hole is part of the SAME 2D profile before
+# there is anything to reconcile. One tessellation, not two.
+profile = Polygon([...]).difference(Point(cx, cy).buffer(radius, resolution=16))
+part = extrude_polygon(profile, height)
+```
+
+This isn't always available — a bore drilled at a compound angle through a
+curved, already-raked face can't always collapse to one profile — but reach
+for it first. Fall back to a real boolean (with the sweep discipline above,
+and the sliver check applied to its actual output) only once the feature
+genuinely can't be expressed as part of the host's own profile.
+
 ## The bench page has its own checker
 
 Recipe bugs are the same shape — they render rather than throw. Run
